@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from typing import Literal
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from pydantic import BaseModel, model_validator, Field
+from pydantic import BaseModel, model_validator, Field, field_validator
 
 app = FastAPI()
 
@@ -37,7 +37,10 @@ class StructuredConditions(BaseModel):
 
     start_time: str | None = None
     end_time: str | None = None
-    desired_duration_minutes: int | None = None
+    desired_duration_minutes: int | None = Field(
+        default=None,
+        gt=0
+    )
 
     activities: list[
         Literal[
@@ -49,7 +52,7 @@ class StructuredConditions(BaseModel):
             "shopping",
             "drink",
         ]
-    ] = []
+    ] = Field(default_factory=list)
 
     transport_mode: Literal[
         "auto",
@@ -67,9 +70,12 @@ class StructuredConditions(BaseModel):
             "child",
             "coworker",
         ]
-    ] = []
+    ] = Field(default_factory=list)
 
-    budget_max: int | None = None
+    budget_max: int | None = Field(
+        default=None,
+        ge=0
+    )
 
     budget_preference: Literal[
         "low",
@@ -77,7 +83,19 @@ class StructuredConditions(BaseModel):
         "flexible",
         "any",
     ] | None = None
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_time_format(cls, value):
 
+        if value is None:
+            return value
+
+        try:
+            datetime.strptime(value, "%H:%M")
+        except ValueError:
+            raise ValueError("시간은 HH:MM 형식이어야 합니다.")
+
+        return value
 
 
 def resolve_start_location(
@@ -171,8 +189,8 @@ def recommend(request: RecommendRequest):
     mock_conditions = StructuredConditions(
         start_location_text=None,
         end_location_text=None,
-        start_time=None,
-        end_time=None,
+        start_time='17:00',
+        end_time='None',
         desired_duration_minutes=120,
         activities=["cafe", "drink"],
         transport_mode="auto",

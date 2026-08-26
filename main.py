@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from typing import Literal
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, model_validator, Field, field_validator
 
 app = FastAPI()
+
+TIME_BUFFER_MINUTES = 10
 
 class RecommendRequest(BaseModel):
     user_message: str
@@ -32,6 +34,9 @@ class RecommendRequest(BaseModel):
         return self
 
 class StructuredConditions(BaseModel):
+    # start_location_text 규칙
+    # - 현재 위치 표현("지금 사당")은 GPS 사용을 위해 null
+    # - 미래/별도 시작 위치("5시에 사당")만 값 저장
     start_location_text: str | None = None
     end_location_text: str | None = None
 
@@ -83,6 +88,7 @@ class StructuredConditions(BaseModel):
         "flexible",
         "any",
     ] | None = None
+
     @field_validator("start_time", "end_time")
     @classmethod
     def validate_time_format(cls, value):
@@ -179,6 +185,114 @@ def resolve_end_time(conditions: StructuredConditions):
         "end_time": None
     }
 
+def resolve_datetimes(
+    start_time: dict,
+    end_time: dict
+):
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    start_datetime = datetime.strptime(
+        start_time["start_time"],
+        "%H:%M"
+    ).replace(
+        year=now.year,
+        month=now.month,
+        day=now.day,
+        tzinfo=ZoneInfo("Asia/Seoul")
+    )
+
+    # 종료 시간이 없는 경우
+    if end_time["end_time"] is None:
+        return {
+            "start_datetime": start_datetime,
+            "end_datetime": None
+        }
+
+    end_datetime = datetime.strptime(
+        end_time["end_time"],
+        "%H:%M"
+    ).replace(
+        year=now.year,
+        month=now.month,
+        day=now.day,
+        tzinfo=ZoneInfo("Asia/Seoul")
+    )
+
+    # 종료 시간이 시작 시간보다 이르면 자정을 넘긴 것으로 처리
+    if end_datetime <= start_datetime:
+        end_datetime += timedelta(days=1)
+
+    return {
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime
+    }
+
+def calculate_time_window(
+    resolved_datetimes: dict
+    ):
+    start_datetime = resolved_datetimes["start_datetime"]
+    end_datetime = resolved_datetimes["end_datetime"]
+
+    # 종료 시간이 없는 경우
+    if end_datetime is None:
+        return {
+            "time_window_minutes": None
+        }
+
+    # 시작 시간부터 종료 시간까지의 전체 시간창을 분 단위로 계산
+    time_window_minutes = int(
+        (end_datetime - start_datetime).total_seconds() / 60
+    )
+
+    return {
+        "time_window_minutes": time_window_minutes
+    }
+
+def calculate_available_stay_minutes(
+    time_window_minutes: int | None,
+    start_to_candidate_travel_minutes: int,
+    candidate_to_end_location_travel_minutes: int = 0
+    ):
+    # 종료시간이 없어 전체 시간창을 계산할 수 없는 경우
+    if time_window_minutes is None:
+        return None
+
+    available_stay_minutes = (
+        time_window_minutes
+        - start_to_candidate_travel_minutes
+        - candidate_to_end_location_travel_minutes
+        - TIME_BUFFER_MINUTES
+    )
+
+    return max(available_stay_minutes, 0)
+
+def check_duration_feasibility(
+    available_stay_minutes: int | None,
+    desired_duration_minutes: int | None
+    ):
+    # 실제 체류 가능시간 자체를 계산할 수 없는 경우
+    if available_stay_minutes is None:
+        return {
+            "is_feasible": None,
+            "reason": "time_window_missing"
+        }
+
+    # 사용자가 원하는 활동시간을 따로 말하지 않은 경우
+    if desired_duration_minutes is None:
+        return {
+            "is_feasible": True,
+            "reason": "no_desired_duration"
+        }
+
+    # 실제 체류 가능시간이 희망 활동시간 이상인지 확인
+    is_feasible = available_stay_minutes >= desired_duration_minutes
+
+    return {
+        "is_feasible": is_feasible,
+        "reason": "enough_time" if is_feasible else "not_enough_time"
+    }
+
+
 @app.get("/")
 def root():
     return {"message": "KOALA backend"}
@@ -190,7 +304,7 @@ def recommend(request: RecommendRequest):
         start_location_text=None,
         end_location_text=None,
         start_time='17:00',
-        end_time='None',
+        end_time='21:00',
         desired_duration_minutes=120,
         activities=["cafe", "drink"],
         transport_mode="auto",
@@ -199,21 +313,46 @@ def recommend(request: RecommendRequest):
         budget_preference=None,
     )
 
-    start_location = resolve_start_location(
+    resolved_start_location = resolve_start_location(
         request,
         mock_conditions
     )
 
-    start_time = resolve_start_time(mock_conditions)
+    resolved_start_time = resolve_start_time(mock_conditions)
 
-    end_location = resolve_end_location(mock_conditions)
+    resolved_end_location = resolve_end_location(mock_conditions)
 
-    end_time = resolve_end_time(mock_conditions)
+    resolved_end_time = resolve_end_time(mock_conditions)
 
+    resolved_datetimes = resolve_datetimes(
+        resolved_start_time,
+        resolved_end_time
+    )
+
+    time_window = calculate_time_window(resolved_datetimes)
+
+    mock_start_to_candidate_travel_minutes = 30
+    mock_candidate_to_end_location_travel_minutes = 40  
+
+    available_stay_minutes = calculate_available_stay_minutes(
+        time_window["time_window_minutes"],
+        mock_start_to_candidate_travel_minutes,
+        mock_candidate_to_end_location_travel_minutes
+    )
+
+    duration_feasibility = check_duration_feasibility(
+        available_stay_minutes,
+        mock_conditions.desired_duration_minutes
+    )
+    
     return {
         "conditions": mock_conditions,
-        "start_location": start_location,
-        "start_time": start_time,
-        "end_location": end_location,
-        "end_time": end_time
+        "start_location": resolved_start_location,
+        "start_time": resolved_start_time,
+        "end_location": resolved_end_location,
+        "end_time": resolved_end_time,
+        "resolved_datetimes": resolved_datetimes,
+        "time_window": time_window,
+        "available_stay_minutes": available_stay_minutes,
+        "duration_feasibility": duration_feasibility
     }

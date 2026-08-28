@@ -292,6 +292,55 @@ def check_duration_feasibility(
         "reason": "enough_time" if is_feasible else "not_enough_time"
     }
 
+# 이동시간 비율 기준
+NORMAL_TRAVEL_RATIO = 0.30
+EXTENDED_TRAVEL_RATIO = 0.40
+
+
+def classify_travel_time(
+    time_window_minutes: int | None,
+    start_to_candidate_travel_minutes: int,
+    candidate_to_end_location_travel_minutes: int = 0
+):
+    # 시작 → 후보지역 + 후보지역 → 다음 일정 위치
+    total_travel_minutes = (
+        start_to_candidate_travel_minutes
+        + candidate_to_end_location_travel_minutes
+    )
+
+    # 종료시간이 없어서 전체 시간창을 알 수 없는 경우
+    # 이동시간 "비율"은 계산할 수 없음
+    if time_window_minutes is None:
+        return {
+            "total_travel_minutes": total_travel_minutes,
+            "travel_ratio": None,
+            "travel_level": "ratio_unavailable"
+        }
+
+    # 전체 시간 중 이동시간이 차지하는 비율
+    travel_ratio = (
+        total_travel_minutes
+        / time_window_minutes
+    )
+
+    # 30% 이하 → 기본 추천 후보
+    if travel_ratio <= NORMAL_TRAVEL_RATIO:
+        travel_level = "normal"
+
+    # 30% 초과 ~ 40% 이하 → 후보 유지, Ranking 감점
+    elif travel_ratio <= EXTENDED_TRAVEL_RATIO:
+        travel_level = "penalty"
+
+    # 40% 초과 → 기본 추천에서는 제외하고
+    # "다른 지역도 보기"에서 사용할 확장 후보
+    else:
+        travel_level = "extended"
+
+    return {
+        "total_travel_minutes": total_travel_minutes,
+        "travel_ratio": travel_ratio,
+        "travel_level": travel_level
+    }
 
 @app.get("/")
 def root():
@@ -331,20 +380,83 @@ def recommend(request: RecommendRequest):
 
     time_window = calculate_time_window(resolved_datetimes)
 
-    mock_start_to_candidate_travel_minutes = 30
-    mock_candidate_to_end_location_travel_minutes = 40  
 
-    available_stay_minutes = calculate_available_stay_minutes(
-        time_window["time_window_minutes"],
-        mock_start_to_candidate_travel_minutes,
-        mock_candidate_to_end_location_travel_minutes
-    )
+    mock_candidates = [
+        {
+            "name": "후보 A",
+            "start_to_candidate_travel_minutes": 30,
+            "candidate_to_end_location_travel_minutes": 30
+        },
+        {
+            "name": "후보 B",
+            "start_to_candidate_travel_minutes": 40,
+            "candidate_to_end_location_travel_minutes": 40
+        },
+        {
+            "name": "후보 C",
+            "start_to_candidate_travel_minutes": 50,
+            "candidate_to_end_location_travel_minutes": 50
+        },
+        {
+        "name": "후보 D",
+        "start_to_candidate_travel_minutes": 70,
+        "candidate_to_end_location_travel_minutes": 70
+        }
+    ]
+    candidate_results = []
 
-    duration_feasibility = check_duration_feasibility(
-        available_stay_minutes,
-        mock_conditions.desired_duration_minutes
-    )
-    
+    # 후보를 추천, 확장, 제외로 분류
+    # 추천
+    recommended_candidates = []
+    # 확장
+    extended_candidates = []
+    # 제외
+    excluded_candidates = []
+
+    for candidate in mock_candidates:
+
+        start_to_candidate_travel_minutes = (
+            candidate["start_to_candidate_travel_minutes"]
+        )
+
+        candidate_to_end_location_travel_minutes = (
+            candidate["candidate_to_end_location_travel_minutes"]
+        )
+        available_stay_minutes = calculate_available_stay_minutes(
+            time_window["time_window_minutes"],
+            start_to_candidate_travel_minutes,
+            candidate_to_end_location_travel_minutes
+        )
+        duration_feasibility = check_duration_feasibility(
+            available_stay_minutes,
+            mock_conditions.desired_duration_minutes
+        )
+        travel_time_classification = classify_travel_time(
+            time_window["time_window_minutes"],
+            start_to_candidate_travel_minutes,
+            candidate_to_end_location_travel_minutes
+        )
+
+        candidate_results.append({
+            "name": candidate["name"],
+            "start_to_candidate_travel_minutes": start_to_candidate_travel_minutes,
+            "candidate_to_end_location_travel_minutes": candidate_to_end_location_travel_minutes,
+            "available_stay_minutes": available_stay_minutes,
+            "duration_feasibility": duration_feasibility,
+            "travel_time_classification": travel_time_classification
+        })
+                # 희망 활동시간을 확보할 수 없는 후보는 제외
+        if duration_feasibility["is_feasible"] is False:
+            excluded_candidates.append(candidate["name"])
+
+        # 이동시간 비율이 40%를 초과하면 확장 추천 후보
+        elif travel_time_classification["travel_level"] == "extended":
+            extended_candidates.append(candidate["name"])
+
+        # normal / penalty는 기본 추천 후보
+        else:
+            recommended_candidates.append(candidate["name"])
+
     return {
         "conditions": mock_conditions,
         "start_location": resolved_start_location,
@@ -353,6 +465,9 @@ def recommend(request: RecommendRequest):
         "end_time": resolved_end_time,
         "resolved_datetimes": resolved_datetimes,
         "time_window": time_window,
-        "available_stay_minutes": available_stay_minutes,
-        "duration_feasibility": duration_feasibility
+        "candidate_results": candidate_results,
+        "recommended_candidates": recommended_candidates,
+        "extended_candidates": extended_candidates,
+        "excluded_candidates": excluded_candidates        
+
     }

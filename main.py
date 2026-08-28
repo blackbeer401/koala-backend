@@ -3,6 +3,7 @@ from typing import Literal
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, model_validator, Field, field_validator
+import pandas as pd
 
 app = FastAPI()
 
@@ -342,9 +343,29 @@ def classify_travel_time(
         "travel_level": travel_level
     }
 
+def load_poi_candidates():
+
+    df = pd.read_excel("poi121.xlsx")
+
+    candidates = df[
+        ["AREA_CD", "AREA_NM", "CATEGORY"]
+    ].to_dict(orient="records")
+
+    return candidates
+
 @app.get("/")
 def root():
     return {"message": "KOALA backend"}
+
+@app.get("/test-poi")
+def test_poi():
+
+    candidates = load_poi_candidates()
+
+    return {
+        "candidate_count": len(candidates),
+        "candidates": candidates
+    }
 
 @app.post("/recommend")
 def recommend(request: RecommendRequest):

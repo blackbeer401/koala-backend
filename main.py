@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from models import RecommendRequest, StructuredConditions
+from map_service import search_location, get_transit
+from poi import load_poi_candidates
+
 
 from conditions import (
     resolve_start_location,
@@ -15,7 +18,7 @@ from candidate_filter import (
     check_duration_feasibility,
     classify_travel_time,
 )
-from poi import load_poi_candidates
+
 
 app = FastAPI()
 
@@ -69,94 +72,83 @@ def recommend(request: RecommendRequest):
 
     time_window = calculate_time_window(resolved_datetimes)
 
+    real_candidates = load_poi_candidates()[:5]
 
-    mock_candidates = [
-        {
-            "name": "후보 A",
-            "start_to_candidate_travel_minutes": 30,
-            "candidate_to_end_location_travel_minutes": 30
-        },
-        {
-            "name": "후보 B",
-            "start_to_candidate_travel_minutes": 40,
-            "candidate_to_end_location_travel_minutes": 40
-        },
-        {
-            "name": "후보 C",
-            "start_to_candidate_travel_minutes": 50,
-            "candidate_to_end_location_travel_minutes": 50
-        },
-        {
-        "name": "후보 D",
-        "start_to_candidate_travel_minutes": 70,
-        "candidate_to_end_location_travel_minutes": 70
-        }
-    ]
-    candidate_results = []
+    test_start = search_location("사당역")
+    test_end = search_location("잠실역")
 
-    # 후보를 추천, 확장, 제외로 분류
-    # 추천
+    real_candidate_results = []
+
     recommended_candidates = []
-    # 확장
     extended_candidates = []
-    # 제외
     excluded_candidates = []
 
-    for candidate in mock_candidates:
+    for candidate in real_candidates:
 
-        start_to_candidate_travel_minutes = (
-            candidate["start_to_candidate_travel_minutes"]
+        start_to_candidate = get_transit(
+            test_start["x"],
+            test_start["y"],
+            candidate["longitude"],
+            candidate["latitude"]
         )
 
-        candidate_to_end_location_travel_minutes = (
-            candidate["candidate_to_end_location_travel_minutes"]
+        candidate_to_end = get_transit(
+            candidate["longitude"],
+            candidate["latitude"],
+            test_end["x"],
+            test_end["y"]
         )
+
         available_stay_minutes = calculate_available_stay_minutes(
             time_window["time_window_minutes"],
-            start_to_candidate_travel_minutes,
-            candidate_to_end_location_travel_minutes
+            start_to_candidate["duration_min"],
+            candidate_to_end["duration_min"]
         )
+
         duration_feasibility = check_duration_feasibility(
             available_stay_minutes,
             mock_conditions.desired_duration_minutes
         )
+
         travel_time_classification = classify_travel_time(
             time_window["time_window_minutes"],
-            start_to_candidate_travel_minutes,
-            candidate_to_end_location_travel_minutes
+            start_to_candidate["duration_min"],
+            candidate_to_end["duration_min"]
         )
 
-        candidate_results.append({
-            "name": candidate["name"],
-            "start_to_candidate_travel_minutes": start_to_candidate_travel_minutes,
-            "candidate_to_end_location_travel_minutes": candidate_to_end_location_travel_minutes,
+        real_candidate_results.append({
+            "AREA_CD": candidate["AREA_CD"],
+            "AREA_NM": candidate["AREA_NM"],
+            "CATEGORY": candidate["CATEGORY"],
+            "start_to_candidate_travel_minutes": start_to_candidate["duration_min"],
+            "candidate_to_end_location_travel_minutes": candidate_to_end["duration_min"],
             "available_stay_minutes": available_stay_minutes,
             "duration_feasibility": duration_feasibility,
             "travel_time_classification": travel_time_classification
         })
-                # 희망 활동시간을 확보할 수 없는 후보는 제외
+
         if duration_feasibility["is_feasible"] is False:
-            excluded_candidates.append(candidate["name"])
+            excluded_candidates.append(candidate["AREA_NM"])
 
-        # 이동시간 비율이 40%를 초과하면 확장 추천 후보
         elif travel_time_classification["travel_level"] == "extended":
-            extended_candidates.append(candidate["name"])
+            extended_candidates.append(candidate["AREA_NM"])
 
-        # normal / penalty는 기본 추천 후보
         else:
-            recommended_candidates.append(candidate["name"])
+            recommended_candidates.append(candidate["AREA_NM"])
 
+
+
+    
     return {
-        "conditions": mock_conditions,
-        "start_location": resolved_start_location,
-        "start_time": resolved_start_time,
-        "end_location": resolved_end_location,
-        "end_time": resolved_end_time,
-        "resolved_datetimes": resolved_datetimes,
-        "time_window": time_window,
-        "candidate_results": candidate_results,
-        "recommended_candidates": recommended_candidates,
-        "extended_candidates": extended_candidates,
-        "excluded_candidates": excluded_candidates        
-
+    "conditions": mock_conditions,
+    "start_location": resolved_start_location,
+    "start_time": resolved_start_time,
+    "end_location": resolved_end_location,
+    "end_time": resolved_end_time,
+    "resolved_datetimes": resolved_datetimes,
+    "time_window": time_window,
+    "real_candidate_results": real_candidate_results,
+    "recommended_candidates": recommended_candidates,
+    "extended_candidates": extended_candidates,
+    "excluded_candidates": excluded_candidates,
     }

@@ -1,46 +1,104 @@
 from typing import Literal
 from datetime import datetime
-from pydantic import BaseModel, model_validator, Field, field_validator
 
+from pydantic import (
+    BaseModel,
+    model_validator,
+    Field,
+    field_validator,
+)
+
+
+# 1. 프론트엔드 → 백엔드로 들어오는 사용자 요청
 class RecommendRequest(BaseModel):
+    """
+    프론트엔드에서 /recommend로 전달하는 최초 요청 데이터.
+
+    사용자가 입력한 자연어 문장과
+    현재 위치 GPS 좌표를 받는다.
+
+    예:
+    {
+        "user_message": "지금 사당인데 7시에 잠실 가야 해. 카페 가고 싶어.",
+        "gps_latitude": 37.4765,
+        "gps_longitude": 126.9816
+    }
+    """
+
+    # 사용자가 입력한 자연어 요청
     user_message: str
 
+    # 현재 위치 위도
     gps_latitude: float | None = Field(
         default=None,
         ge=-90,
         le=90
     )
 
+    # 현재 위치 경도
     gps_longitude: float | None = Field(
         default=None,
         ge=-180,
         le=180
     )
 
+    # 위도와 경도 중 하나만 들어오는 것을 방지
     @model_validator(mode="after")
     def validate_gps_pair(self):
 
-        if (self.gps_latitude is None) != (self.gps_longitude is None):
+        if (
+            (self.gps_latitude is None)
+            != (self.gps_longitude is None)
+        ):
             raise ValueError(
                 "gps_latitude와 gps_longitude는 함께 입력되어야 합니다."
             )
 
         return self
 
+
+# 2. 자연어 요청에서 추출한 추천 조건
 class StructuredConditions(BaseModel):
-    # start_location_text 규칙
-    # - 현재 위치 표현("지금 사당")은 GPS 사용을 위해 null
-    # - 미래/별도 시작 위치("5시에 사당")만 값 저장
+    """
+    사용자의 자연어 요청을 추천 계산에 사용할 수 있도록
+    구조화한 조건을 저장한다.
+
+    현재 main.py에서는 아직 LLM 추출 기능을 연결하지 않아
+    mock_conditions로 직접 생성해서 테스트하고 있다.
+    """
+
+    # 추천을 시작할 별도 위치
+    #
+    # 현재 위치 표현:
+    # "지금 사당이야"
+    # → GPS를 사용하기 위해 None
+    #
+    # 별도 시작 위치 표현:
+    # "5시에 사당에서 출발할 거야"
+    # → "사당" 저장
     start_location_text: str | None = None
+
+    # 다음 일정 위치
+    # 예: "7시에 잠실 가야 해" → "잠실"
     end_location_text: str | None = None
 
+    # 추천 활동 시작시간
+    # HH:MM 형식
     start_time: str | None = None
+
+    # 활동 종료시간 또는 다음 일정시간
+    # HH:MM 형식
     end_time: str | None = None
+
+    # 사용자가 원하는 최소 체류시간
+    # 예: 2시간 → 120
     desired_duration_minutes: int | None = Field(
         default=None,
         gt=0
     )
 
+    # 사용자가 원하는 활동 종류
+    # 여러 활동을 동시에 선택할 수 있다.
     activities: list[
         Literal[
             "food",
@@ -51,8 +109,12 @@ class StructuredConditions(BaseModel):
             "shopping",
             "drink",
         ]
-    ] = Field(default_factory=list)
+    ] = Field(
+        default_factory=list
+    )
 
+    # 이동수단
+    # auto는 백엔드에서 상황에 맞게 판단하기 위한 기본값
     transport_mode: Literal[
         "auto",
         "public_transit",
@@ -60,6 +122,7 @@ class StructuredConditions(BaseModel):
         "car",
     ] = "auto"
 
+    # 동행인
     companions: list[
         Literal[
             "solo",
@@ -69,13 +132,17 @@ class StructuredConditions(BaseModel):
             "child",
             "coworker",
         ]
-    ] = Field(default_factory=list)
+    ] = Field(
+        default_factory=list
+    )
 
+    # 사용자가 제시한 최대 예산
     budget_max: int | None = Field(
         default=None,
         ge=0
     )
 
+    # 사용자의 예산 선호
     budget_preference: Literal[
         "low",
         "medium",
@@ -83,16 +150,31 @@ class StructuredConditions(BaseModel):
         "any",
     ] | None = None
 
-    @field_validator("start_time", "end_time")
+    # start_time / end_time이 들어온 경우
+    # HH:MM 형식인지 검사
+    @field_validator(
+        "start_time",
+        "end_time"
+    )
     @classmethod
-    def validate_time_format(cls, value):
+    def validate_time_format(
+        cls,
+        value
+    ):
 
+        # 시간이 없는 것은 허용
         if value is None:
             return value
 
         try:
-            datetime.strptime(value, "%H:%M")
+            datetime.strptime(
+                value,
+                "%H:%M"
+            )
+
         except ValueError:
-            raise ValueError("시간은 HH:MM 형식이어야 합니다.")
+            raise ValueError(
+                "시간은 HH:MM 형식이어야 합니다."
+            )
 
         return value

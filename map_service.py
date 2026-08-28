@@ -4,19 +4,22 @@ import requests
 from dotenv import load_dotenv
 
 
+# 1. Kakao API 키 불러오기
+# .env 파일에 저장된 KAKAO_REST_API_KEY를 사용한다.
 load_dotenv()
 
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 
+
+# 2. Kakao API 요청에 사용할 인증 헤더 생성
 def kakao_headers():
     return {
         "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"
     }
 
+
 # 3. 장소명 / 주소 → 좌표 변환
-
 def search_location(query: str):
-
     """
     사용자가 입력한 장소명 또는 주소를
     Kakao Local API를 이용해 좌표로 변환한다.
@@ -36,11 +39,10 @@ def search_location(query: str):
         "y": 위도
     }
 
-    검색 결과가 없으면 None 반환.
+    장소와 주소 모두 검색되지 않으면 None을 반환한다.
     """
 
     # 3-1. 키워드 장소 검색
-
     keyword_url = (
         "https://dapi.kakao.com/v2/local/search/keyword.json"
     )
@@ -55,20 +57,20 @@ def search_location(query: str):
 
     data = response.json()
 
-    # 검색 결과가 존재하면 첫 번째 장소를 사용한다.
+    # 검색 결과가 있으면 첫 번째 장소 사용
     if data.get("documents"):
 
         place = data["documents"][0]
 
         return {
-            # 실제 카카오 장소명
+            # 실제 Kakao 장소명
             "name": place.get(
                 "place_name",
                 query
             ),
 
-            # 도로명 주소가 있으면 우선 사용하고,
-            # 없으면 일반 지번 주소 사용
+            # 도로명 주소가 있으면 우선 사용하고
+            # 없으면 지번 주소 사용
             "address": (
                 place.get("road_address_name")
                 or place.get("address_name")
@@ -81,9 +83,7 @@ def search_location(query: str):
             "y": float(place["y"])
         }
 
-
-    # 3-2. 키워드 검색 실패 시 주소 검색
-
+    # 3-2. 키워드 검색 결과가 없으면 주소 검색
     address_url = (
         "https://dapi.kakao.com/v2/local/search/address.json"
     )
@@ -98,8 +98,7 @@ def search_location(query: str):
 
     data = response.json()
 
-
-    # 주소 검색 결과가 존재할 경우
+    # 주소 검색 결과가 있으면 첫 번째 결과 사용
     if data.get("documents"):
 
         place = data["documents"][0]
@@ -111,42 +110,35 @@ def search_location(query: str):
             "y": float(place["y"])
         }
 
-
-    # 장소와 주소 모두 검색되지 않음
+    # 장소명과 주소 모두 검색되지 않은 경우
     return None
 
-# 7. 대중교통 경로 조회
 
+# 4. 대중교통 경로 조회
 def get_transit(
     start_x,
     start_y,
     end_x,
     end_y
 ):
-
     """
-    Kakao 대중교통 Routing API를 이용한다.
+    Kakao 대중교통 Routing API를 이용해
+    두 좌표 사이의 실제 대중교통 경로를 조회한다.
 
-    대중교통 경로에는
-    - 도보
-    - 버스
-    - 지하철
+    경로에는 도보 / 버스 / 지하철 구간이 포함될 수 있다.
 
-    구간이 함께 포함될 수 있다.
-
-    반환:
-    - 총 거리
-    - 총 이동시간
+    주요 반환값:
+    - 전체 이동거리
+    - 전체 이동시간
     - 환승 횟수
     - 교통요금
-    - 버스/지하철/도보 각각의 세부 경로
+    - 버스 / 지하철 / 도보 세부 경로
     """
 
     url = (
         "https://dapi.kakao.com/"
         "v2/routing/publictraffic"
     )
-
 
     params = {
         "start_x": start_x,
@@ -155,102 +147,81 @@ def get_transit(
         "end_y": end_y
     }
 
-
     response = requests.get(
         url,
         headers=kakao_headers(),
         params=params
     )
 
-
     data = response.json()
 
-
-    # 조회 실패 시 카카오 응답을 그대로 반환
+    # 조회 실패 시 Kakao 응답을 그대로 반환
     if data.get("status") != "OK":
         return data
 
-
-    # 여러 추천 경로 중
-    # 현재 테스트에서는 첫 번째 경로만 사용한다.
+    # 여러 추천 경로 중 현재는 첫 번째 경로 사용
     route = data["routes"][0]
-
 
     # 전체 경로 정보
     properties = route["properties"]
 
-
-    # 세부 이동 경로 저장
+    # 세부 이동 경로를 저장할 리스트
     paths = []
 
-
-    # 전체 대중교통 경로를 구간별로 나눈다.
+    # 전체 경로를 도보 / 버스 / 지하철 구간별로 나눠 저장
     for step in route["steps"]:
 
         step_properties = step["properties"]
 
-
-        # 현재 구간 이동수단
         # WALKING / BUS / SUBWAY
         step_type = step_properties["type"]
 
-
-        # 버스번호 또는 지하철 노선 등의 정보
+        # 버스 번호 또는 지하철 노선 정보
         vehicles = step_properties.get(
             "vehicles",
             []
         )
 
-
         vehicle_name = None
 
-
-        # 노선 정보가 존재하는 경우
         if vehicles:
-
             vehicle_name = vehicles[0].get(
                 "name"
             )
 
-
         paths.append({
-
             # WALKING / BUS / SUBWAY
             "type": step_type,
 
-            # 예:
-            # 2호선
-            # 341번 버스
+            # 예: 2호선, 341번 버스
             "vehicle": vehicle_name,
 
             # 이동 안내문
             "guidance":
                 step_properties.get("guidance"),
 
-            # 구간 거리
+            # 해당 구간 거리
             "distance":
                 step_properties.get("distance"),
 
-            # 구간 시간
+            # 해당 구간 이동시간
             "time":
                 step_properties.get("time"),
 
-            # 지도에 표시할 실제 좌표
+            # 지도에 경로를 표시할 때 사용할 좌표
             "points":
                 step["path"]["points"]
         })
 
-
     return {
-
-        # 대중교통
+        # 이동수단
         "mode": "transit",
 
         # BUS / SUBWAY / BUS_AND_SUBWAY 등
         "route_type":
             properties["type"],
 
-        # 전체 이동거리
+        # 전체 이동거리(m)
         "distance_m":
             properties["totalDistance"],
 
@@ -258,7 +229,7 @@ def get_transit(
         "duration_sec":
             properties["totalTime"],
 
-        # 화면 표시용 분 단위 시간
+        # 계산 및 화면 표시용 이동시간(분)
         "duration_min":
             round(properties["totalTime"] / 60),
 
@@ -270,6 +241,6 @@ def get_transit(
         "fare":
             properties["fare"]["value"],
 
-        # 세부 경로
+        # 도보 / 버스 / 지하철 세부 경로
         "paths": paths
     }

@@ -56,3 +56,20 @@ def calculate_final_score(
     )
 
     return final_score
+
+def convert_travel_minutes_to_score(
+    travel_minutes: int
+):
+    """
+    종료시간이 없는 경우,
+    실제 이동시간 자체를 기준으로 1~5점으로 변환한다.
+
+    0분  -> 5점
+    30분 -> 3점
+    60분 -> 1점
+    60분 초과 -> 최소 1점
+    """
+
+    score = 5 - (travel_minutes / 60) * 4
+
+    return max(1, score)

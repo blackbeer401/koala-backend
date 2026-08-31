@@ -11,6 +11,10 @@ TIME_BUFFER_MINUTES = 10
 NORMAL_TRAVEL_RATIO = 0.30
 EXTENDED_TRAVEL_RATIO = 0.40
 
+# 종료시간이 없을 때 사용하는 실제 이동시간 기준
+NORMAL_TRAVEL_MINUTES = 30
+EXTENDED_TRAVEL_MINUTES = 60
+
 
 # 2. 두 좌표 사이의 직선거리 계산
 def calculate_straight_distance_km(
@@ -161,12 +165,21 @@ def classify_travel_time(
     # 전체 시간창을 알 수 없으면
     # 이동시간 비율은 계산할 수 없다.
     if time_window_minutes is None:
+
+        if total_travel_minutes <= NORMAL_TRAVEL_MINUTES:
+            travel_level = "normal"
+
+        elif total_travel_minutes <= EXTENDED_TRAVEL_MINUTES:
+            travel_level = "penalty"
+
+        else:
+            travel_level = "extended"
+
         return {
             "total_travel_minutes": total_travel_minutes,
             "travel_ratio": None,
-            "travel_level": "ratio_unavailable"
+            "travel_level": travel_level
         }
-
     # 전체 시간 중 이동시간이 차지하는 비율
     travel_ratio = (
         total_travel_minutes
@@ -278,6 +291,51 @@ def preselect_candidates_by_detour(
     candidate_results.sort(
         key=lambda candidate:
             candidate["detour_distance_km"]
+    )
+
+    # 상위 N개만 반환
+    return candidate_results[:limit]
+
+# 7. 종료지가 없을 때 시작 위치와 가까운 POI를 1차 선별
+def preselect_candidates_by_distance(
+    candidates: list[dict],
+    start_latitude: float,
+    start_longitude: float,
+    limit: int = 20
+):
+    """
+    종료 위치가 없는 경우,
+    현재 시작 위치에서 가까운 후보지역부터 상위 N개를 반환한다.
+
+    지도 API를 사용하지 않고 직선거리만 계산하는
+    저비용 1차 필터다.
+
+    실제 이동시간은 이후 지도 API에서 다시 계산한다.
+    """
+
+    candidate_results = []
+
+    for candidate in candidates:
+
+        # 시작 위치 → 후보지역 직선거리
+        start_to_candidate_km = calculate_straight_distance_km(
+            start_latitude,
+            start_longitude,
+            candidate["latitude"],
+            candidate["longitude"]
+        )
+
+        # 기존 후보 정보에 거리 계산 결과 추가
+        candidate_results.append({
+            **candidate,
+            "start_to_candidate_km":
+                start_to_candidate_km
+        })
+
+    # 시작 위치에서 가까운 후보부터 정렬
+    candidate_results.sort(
+        key=lambda candidate:
+            candidate["start_to_candidate_km"]
     )
 
     # 상위 N개만 반환

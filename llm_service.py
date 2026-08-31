@@ -4,6 +4,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from openai import OpenAI
 from dotenv import load_dotenv
+from models import StructuredConditions
 
 load_dotenv()
 
@@ -135,3 +136,25 @@ def parse_user_intent(
         )
 
     return intent
+
+
+if __name__ == "__main__":
+    test_input = "지금 사당인데 7시에 잠실 약속 있어. 그사이에 카페 가고 싶어."
+
+    test_datetime = "2026-08-31T12:48:00+09:00"
+
+    result = parse_user_intent(
+        user_input=test_input,
+        current_datetime=test_datetime
+    )
+
+    print(json.dumps(
+        result,
+        ensure_ascii=False,
+        indent=2
+    ))
+
+    conditions = StructuredConditions(**result)
+
+    print("\n=== StructuredConditions 변환 결과 ===")
+    print(conditions.model_dump())

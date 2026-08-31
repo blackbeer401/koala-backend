@@ -90,8 +90,40 @@ class StructuredConditions(BaseModel):
     # HH:MM 형식
     end_time: str | None = None
 
-    # 사용자가 원하는 최소 체류시간
-    # 예: 2시간 → 120
+    # 정확한 시작시간이 없을 때 사용하는 시간대
+    start_time_period: Literal[
+        "morning",
+        "lunch",
+        "evening",
+        "am",
+        "pm",
+    ] | None = None
+
+    # 정확한 종료시간이 없을 때 사용하는 시간대
+    end_time_period: Literal[
+        "morning",
+        "lunch",
+        "evening",
+        "am",
+        "pm",
+    ] | None = None
+
+    # LLM이 추출한 최소 희망 체류시간
+    # 예: "1~2시간 정도 있고 싶어" → 60
+    desired_duration_min_minutes: int | None = Field(
+        default=None,
+        gt=0
+    )
+
+    # LLM이 추출한 최대 희망 체류시간
+    # 예: "1~2시간 정도 있고 싶어" → 120
+    desired_duration_max_minutes: int | None = Field(
+        default=None,
+        gt=0
+    )
+
+    # 기존 백엔드 추천 로직에서 사용하는 체류시간
+    # 기존 코드 호환을 위해 임시 유지
     desired_duration_minutes: int | None = Field(
         default=None,
         gt=0
@@ -149,6 +181,23 @@ class StructuredConditions(BaseModel):
         "flexible",
         "any",
     ] | None = None
+
+    # 실내 / 야외 공간 선호
+    space_preference: Literal[
+        "indoor",
+        "outdoor",
+        "any",
+    ] | None = None
+
+    @model_validator(mode="after")
+    def set_legacy_desired_duration(self):
+
+        if self.desired_duration_minutes is None:
+            self.desired_duration_minutes = (
+                self.desired_duration_min_minutes
+            )
+
+        return self
 
     # start_time / end_time이 들어온 경우
     # HH:MM 형식인지 검사

@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 
+from datetime import datetime
+
 from models import RecommendRequest, StructuredConditions
+
+from llm_service import parse_user_intent
+
 from map_service import (
     search_location,
     get_transit,
@@ -25,6 +30,7 @@ from candidate_filter import (
     check_duration_feasibility,
     classify_travel_time,
     preselect_candidates_by_detour,
+    preselect_candidates_by_distance,
     
 )
 
@@ -39,6 +45,7 @@ from ranking import (
     convert_congestion_to_score, 
     convert_travel_ratio_to_score,
     calculate_final_score,
+    convert_travel_minutes_to_score,
 )
 
 
@@ -70,21 +77,14 @@ def test_poi():
 @app.post("/recommend")
 def recommend(request: RecommendRequest):
 
-    # 현재는 LLM 조건 추출 기능이 연결되지 않았기 때문에
-    # 추천 파이프라인 테스트용 조건을 직접 설정한다.
-    mock_conditions = StructuredConditions(
-        start_location_text=None,
-        end_location_text=None,
-        start_time="19:00",
-        end_time="23:00",   
-        desired_duration_minutes=120,
-        activities=["drink"],
-        transport_mode="auto",  
-        companions=[],
-        budget_max=None,
-        budget_preference=None,
+    current_datetime = datetime.now().astimezone().isoformat()
+
+    intent = parse_user_intent(
+        user_input=request.user_message,
+        current_datetime=current_datetime
     )
 
+    mock_conditions = StructuredConditions(**intent)
     # 5. 사용자 시작 위치 결정
     # request의 GPS와 구조화된 위치 조건을 이용한다.
     resolved_start_location = resolve_start_location(
@@ -119,19 +119,46 @@ def recommend(request: RecommendRequest):
     # 9. 전체 POI를 불러온 뒤 우회거리 기준으로 1차 후보를 선별한다.
     all_candidates = load_poi_candidates()
 
-    # 현재 테스트를 위해 시작점과 종료점을 임의로 지정한다
-    test_start = search_location("홍대입구역")
-    test_end = search_location("잠실역")
+    # 실제 시작 위치를 좌표 형태로 변환한다.
+    if resolved_start_location["source"] == "text":
+        start_location = search_location(
+            resolved_start_location["location_text"]
+        )
 
-    # 전체 121개 POI 중 동선에서 크게 벗어나지 않는 후보 20개를 먼저 선별한다.
-    real_candidates = preselect_candidates_by_detour(
-        candidates=all_candidates,
-        start_latitude=float(test_start["y"]),
-        start_longitude=float(test_start["x"]),
-        end_latitude=float(test_end["y"]),
-        end_longitude=float(test_end["x"]),
-        limit=20,
-    )
+    elif resolved_start_location["source"] == "gps":
+        start_location = {
+            "x": resolved_start_location["longitude"],
+            "y": resolved_start_location["latitude"]
+        }
+
+
+    # 실제 종료 위치를 좌표 형태로 변환한다.
+    if resolved_end_location["source"] == "text":
+        end_location = search_location(
+            resolved_end_location["location_text"]
+        )
+    else:
+        end_location = None
+
+    # 종료지가 있는 경우 → 시작-후보-종료 우회거리 기준
+    if end_location is not None:
+        real_candidates = preselect_candidates_by_detour(
+            candidates=all_candidates,
+            start_latitude=float(start_location["y"]),
+            start_longitude=float(start_location["x"]),
+            end_latitude=float(end_location["y"]),
+            end_longitude=float(end_location["x"]),
+            limit=20,
+        )
+
+    # 종료지가 없는 경우 → 시작 위치와 가까운 거리 기준
+    else:
+        real_candidates = preselect_candidates_by_distance(
+            candidates=all_candidates,
+            start_latitude=float(start_location["y"]),
+            start_longitude=float(start_location["x"]),
+            limit=20,
+        )
 
     # 우회거리로 선별된 후보에 활동 적합도 점수를 연결해 확인한다.
     activity_scores = load_poi_activity_scores()
@@ -145,8 +172,11 @@ def recommend(request: RecommendRequest):
         activity_scores["AREA_CD"].isin(selected_area_codes)
     ]
 
-    detour_distance_map = {
-        candidate["AREA_CD"]: candidate["detour_distance_km"]
+    distance_map = {
+        candidate["AREA_CD"]: {
+            "detour_distance_km": candidate.get("detour_distance_km"),
+            "start_to_candidate_km": candidate.get("start_to_candidate_km"),
+        }
         for candidate in real_candidates
     }
     candidate_location_map = {
@@ -164,7 +194,8 @@ def recommend(request: RecommendRequest):
             "AREA_NM": row["AREA_NM"],
             "latitude": candidate_location_map[row["AREA_CD"]]["latitude"],
             "longitude": candidate_location_map[row["AREA_CD"]]["longitude"],
-            "detour_distance_km": detour_distance_map[row["AREA_CD"]],
+            "detour_distance_km": distance_map[row["AREA_CD"]]["detour_distance_km"],
+            "start_to_candidate_km": distance_map[row["AREA_CD"]]["start_to_candidate_km"],
             "cafe_score": row["cafe_score"],
             "drink_score": row["drink_score"],
         })
@@ -205,8 +236,8 @@ def recommend(request: RecommendRequest):
     for candidate in api_candidates:
 
         start_to_candidate = get_transit(
-            test_start["x"],
-            test_start["y"],
+            start_location["x"],
+            start_location["y"],
             candidate["longitude"],
             candidate["latitude"]
         )
@@ -217,15 +248,15 @@ def recommend(request: RecommendRequest):
             # 대중교통 경로가 없는 경우
             # 먼저 출발지와 후보지가 가까운지 확인한다.
             if is_nearby(
-                test_start["x"],
-                test_start["y"],
+                start_location["x"],
+                start_location["y"],
                 candidate["longitude"],
                 candidate["latitude"]
             ):
 
                 start_to_candidate = get_walking(
-                    test_start["x"],
-                    test_start["y"],
+                    start_location["x"],
+                    start_location["y"],
                     candidate["longitude"],
                     candidate["latitude"]
                 )
@@ -249,51 +280,40 @@ def recommend(request: RecommendRequest):
                     f"(start → candidate)"
                 )
                 continue
-        candidate_to_end = get_transit(
-            candidate["longitude"],
-            candidate["latitude"],
-            test_end["x"],
-            test_end["y"]
-        )
+        # 종료지가 있는 경우에만 후보 → 종료지 이동시간을 계산한다.
+        if end_location is not None:
 
-        # 대중교통 경로가 없는 경우 도보 이동을 시도한다.
-        if "duration_min" not in candidate_to_end:
-
-            # 대중교통 경로가 없는 경우
-            # 먼저 후보지와 도착지가 가까운지 확인한다.
-            if is_nearby(
+            candidate_to_end = get_transit(
                 candidate["longitude"],
                 candidate["latitude"],
-                test_end["x"],
-                test_end["y"]
-            ):
+                end_location["x"],
+                end_location["y"]
+            )
 
-                candidate_to_end = get_walking(
+            # 대중교통 경로가 없으면 가까운 경우 도보 이동을 시도한다.
+            if "duration_min" not in candidate_to_end:
+
+                if is_nearby(
                     candidate["longitude"],
                     candidate["latitude"],
-                    test_end["x"],
-                    test_end["y"]
-                )
+                    end_location["x"],
+                    end_location["y"]
+                ):
+                    candidate_to_end = get_walking(
+                        candidate["longitude"],
+                        candidate["latitude"],
+                        end_location["x"],
+                        end_location["y"]
+                    )
 
-                print(
-                    f"Transit route not found: "
-                    f"{candidate['AREA_NM']} "
-                    f"(candidate → end)"
-                )
+                else:
+                    continue
 
-                print(
-                    f"Walking fallback: "
-                    f"{candidate_to_end['duration_min']} min"
-                )
-
-            else:
-                print(
-                    f"Transit route not found and "
-                    f"too far to walk: "
-                    f"{candidate['AREA_NM']} "
-                    f"(candidate → end)"
-                )
-                continue
+        # 종료지가 없으면 후보 → 종료지 이동시간은 0으로 처리한다.
+        else:
+            candidate_to_end = {
+                "duration_min": 0
+            }
 
         candidate["start_to_candidate_travel_minutes"] = (
             start_to_candidate["duration_min"]
@@ -333,9 +353,17 @@ def recommend(request: RecommendRequest):
             )
         )
 
-        candidate["travel_score"] = convert_travel_ratio_to_score(
-            candidate["travel_time_classification"]["travel_ratio"]
-        )
+        # 종료시간이 있는 경우 → 전체 시간 대비 이동 비율로 점수 계산
+        if time_window["time_window_minutes"] is not None:
+            candidate["travel_score"] = convert_travel_ratio_to_score(
+                candidate["travel_time_classification"]["travel_ratio"]
+            )
+
+        # 종료시간이 없는 경우 → 실제 이동시간으로 점수 계산
+        else:
+            candidate["travel_score"] = convert_travel_minutes_to_score(
+                candidate["travel_time_classification"]["total_travel_minutes"]
+            )
 
         congestion_data = get_congestion_data(
             candidate["AREA_CD"]
@@ -367,7 +395,7 @@ def recommend(request: RecommendRequest):
 
     for candidate in api_candidates:
 
-        if not candidate["duration_feasibility"]["is_feasible"]:
+        if candidate["duration_feasibility"]["is_feasible"] is False:
             excluded_candidates.append(candidate)
 
         elif candidate["travel_time_classification"]["travel_level"] == "extended":

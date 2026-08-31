@@ -238,3 +238,9 @@ def calculate_time_window(
         "time_window_minutes":
             time_window_minutes
     }
+
+def calculate_candidate_arrival_time(
+    start_datetime,
+    travel_minutes
+):
+    return start_datetime + timedelta(minutes=travel_minutes)

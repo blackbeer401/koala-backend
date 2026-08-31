@@ -11,6 +11,7 @@ from conditions import (
     resolve_end_time,
     resolve_datetimes,
     calculate_time_window,
+    calculate_candidate_arrival_time,
 )
 
 from candidate_filter import (
@@ -22,6 +23,17 @@ from candidate_filter import (
 )
 
 from activity_score import load_poi_activity_scores
+
+from congestion_service import (
+    get_congestion_data,
+    get_nearest_forecast_congestion,
+)
+
+from ranking import (
+    convert_congestion_to_score, 
+    convert_travel_ratio_to_score,
+    calculate_final_score,
+)
 
 
 # 1. FastAPI 앱 생성
@@ -210,9 +222,40 @@ def recommend(request: RecommendRequest):
             classify_travel_time(
                 time_window["time_window_minutes"],
                 start_to_candidate["duration_min"],
-                candidate_to_end["duration_min"]
+                candidate_to_end["duration_min"],
+                
             )
         )
+
+        candidate["arrival_datetime"] = (
+            calculate_candidate_arrival_time(
+                resolved_datetimes["start_datetime"],
+                start_to_candidate["duration_min"]
+            )
+        )
+        candidate["travel_score"] = convert_travel_ratio_to_score(
+            candidate["travel_time_classification"]["travel_ratio"]
+        )
+        congestion_data = get_congestion_data(
+            candidate["AREA_CD"]
+        )
+
+        forecast_congestion = get_nearest_forecast_congestion(
+            congestion_data,
+            candidate["arrival_datetime"]
+        )
+
+        candidate["forecast_congestion"] = forecast_congestion
+
+        candidate["congestion_score"] = convert_congestion_to_score(
+            forecast_congestion["FCST_CONGEST_LVL"]
+        )
+        candidate["final_score"] = calculate_final_score(
+            activity_score=candidate["activity_match_score"],
+            travel_score=candidate["travel_score"],
+            congestion_score=candidate["congestion_score"]
+        )
+
     recommended_candidates = []
     extended_candidates = []
     excluded_candidates = []
@@ -227,10 +270,21 @@ def recommend(request: RecommendRequest):
 
         else:
             recommended_candidates.append(candidate)
+    # 추천 가능한 후보를 최종 추천점수가 높은 순서대로 정렬한다.
+    recommended_candidates.sort(
+        key=lambda candidate: candidate["final_score"],
+        reverse=True
+    )
+
+    # 최종 추천지역 상위 3개를 선정한다.
+    final_candidates = recommended_candidates[:3]
+    
     return {
         "activity_test_results": activity_test_results,
         "api_candidates": api_candidates,
         "recommended_candidates": recommended_candidates,
         "extended_candidates": extended_candidates,
-        "excluded_candidates": excluded_candidates
+        "excluded_candidates": excluded_candidates,
+        "final_candidates": final_candidates
+
     }

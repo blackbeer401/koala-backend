@@ -240,7 +240,7 @@ def get_transit(
 
         # 총 교통요금
         "fare":
-            properties["fare"]["value"],
+            properties.get("fare", {}).get("value"),
 
         # 도보 / 버스 / 지하철 세부 경로
         "paths": paths
@@ -356,3 +356,77 @@ def is_nearby(
     distance_km = earth_radius * c
 
     return distance_km <= max_distance_km
+
+
+def get_travel(
+    start_x,
+    start_y,
+    end_x,
+    end_y,
+    transport_mode="auto"
+):
+    """
+    사용자가 선택한 이동수단에 따라 이동시간을 계산한다.
+
+    auto:
+    - 1.5km 이내 → 도보
+    - 1.5km 초과 → 대중교통
+
+    public_transit:
+    - 대중교통
+
+    walk:
+    - 도보
+    """
+
+    # 도보를 직접 선택한 경우
+    if transport_mode == "walk":
+        print("get_travel mode: walk")
+
+        return get_walking(
+            start_x,
+            start_y,
+            end_x,
+            end_y
+        )
+
+    # 대중교통을 직접 선택한 경우
+    if transport_mode == "public_transit":
+        print("get_travel mode: public_transit")
+
+        return get_transit(
+            start_x,
+            start_y,
+            end_x,
+            end_y
+        )
+
+    # auto인 경우 가까우면 도보
+    if transport_mode == "auto":
+
+        if is_nearby(
+            start_x,
+            start_y,
+            end_x,
+            end_y
+        ):
+            print("get_travel mode: auto -> walk")
+
+            return get_walking(
+                start_x,
+                start_y,
+                end_x,
+                end_y
+            )
+
+        print("get_travel mode: auto -> public_transit")
+
+        return get_transit(
+            start_x,
+            start_y,
+            end_x,
+            end_y
+        )
+
+    # 아직 지원하지 않는 이동수단
+    return None

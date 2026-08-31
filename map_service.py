@@ -381,7 +381,6 @@ def get_travel(
 
     # 도보를 직접 선택한 경우
     if transport_mode == "walk":
-        print("get_travel mode: walk")
 
         return get_walking(
             start_x,
@@ -392,7 +391,6 @@ def get_travel(
 
     # 대중교통을 직접 선택한 경우
     if transport_mode == "public_transit":
-        print("get_travel mode: public_transit")
 
         return get_transit(
             start_x,
@@ -410,7 +408,6 @@ def get_travel(
             end_x,
             end_y
         ):
-            print("get_travel mode: auto -> walk")
 
             return get_walking(
                 start_x,
@@ -419,7 +416,6 @@ def get_travel(
                 end_y
             )
 
-        print("get_travel mode: auto -> public_transit")
 
         return get_transit(
             start_x,

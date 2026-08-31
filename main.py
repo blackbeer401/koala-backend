@@ -87,8 +87,7 @@ def recommend(request: RecommendRequest):
 
     conditions = StructuredConditions(**intent)
 
-    print("LLM activities:", conditions.activities)
-    print("LLM transport_mode:", conditions.transport_mode)
+
     # 5. 사용자 시작 위치 결정
     # request의 GPS와 구조화된 위치 조건을 이용한다.
     resolved_start_location = resolve_start_location(

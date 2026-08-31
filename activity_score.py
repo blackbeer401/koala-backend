@@ -338,6 +338,86 @@ def convert_counts_to_scores(poi_activity_df):
 
     return score_df
 
+# 9. POI CATEGORY를 이용해 walk / culture / shopping 점수 생성
+def add_category_activity_scores(score_df):
+    """
+    서울시 121개 POI의 CATEGORY를 이용해
+    walk / culture / shopping 활동 적합도를 1~5점으로 부여한다.
+
+    점포 수로 판단하기 어려운 활동이므로
+    POI 자체 성격을 기준으로 하는 MVP용 규칙 점수다.
+    """
+
+    category_scores = {
+        "공원": {
+            "walk_score": 5,
+            "culture_score": 2,
+            "shopping_score": 1,
+        },
+
+        "고궁·문화유산": {
+            "walk_score": 4,
+            "culture_score": 5,
+            "shopping_score": 2,
+        },
+
+        "관광특구": {
+            "walk_score": 3,
+            "culture_score": 3,
+            "shopping_score": 4,
+        },
+
+        "발달상권": {
+            "walk_score": 2,
+            "culture_score": 1,
+            "shopping_score": 5,
+        },
+
+        "인구밀집지역": {
+            "walk_score": 1,
+            "culture_score": 1,
+            "shopping_score": 3,
+        },
+    }
+
+    result_df = score_df.copy()
+
+    result_df["walk_score"] = (
+        result_df["CATEGORY"]
+        .map(
+            lambda category:
+            category_scores.get(
+                category,
+                {}
+            ).get("walk_score", 1)
+        )
+    )
+
+    result_df["culture_score"] = (
+        result_df["CATEGORY"]
+        .map(
+            lambda category:
+            category_scores.get(
+                category,
+                {}
+            ).get("culture_score", 1)
+        )
+    )
+
+    result_df["shopping_score"] = (
+        result_df["CATEGORY"]
+        .map(
+            lambda category:
+            category_scores.get(
+                category,
+                {}
+            ).get("shopping_score", 1)
+        )
+    )
+
+    return result_df
+
+
 def load_poi_activity_scores(
     store_file="data/서울시 상권분석서비스(점포-행정동)_2025년.csv",
     mapping_file="data/poi121_매핑결과.csv"
@@ -382,8 +462,12 @@ def load_poi_activity_scores(
         poi_activity_df
     )
 
-    return poi_score_df
+    # POI CATEGORY 기반 활동 점수 추가
+    poi_score_df = add_category_activity_scores(
+        poi_score_df
+    )
 
+    return poi_score_df
 # 테스트 실행
 # activity_score.py를 직접 실행했을 때만 아래 코드가 실행된다.
 # 다른 파일에서 import할 때는 실행되지 않는다.
@@ -454,3 +538,4 @@ if __name__ == "__main__":
             ]
         ].head(30)
     )
+

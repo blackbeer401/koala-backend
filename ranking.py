@@ -45,14 +45,14 @@ def calculate_final_score(
     가중합하여 최종 추천 점수를 계산한다.
 
     활동 적합도: 50%
-    혼잡도: 30%
-    이동 부담: 20%
+    이동 부담: 30%
+    혼잡도: 20%
     """
 
     final_score = (
         activity_score * 0.5
-        + congestion_score * 0.3
-        + travel_score * 0.2
+        + travel_score * 0.3
+        + congestion_score * 0.2
     )
 
     return final_score

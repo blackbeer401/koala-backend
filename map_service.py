@@ -157,6 +157,7 @@ def get_transit(
 
     # 조회 실패 시 Kakao 응답을 그대로 반환
     if data.get("status") != "OK":
+        print("Kakao transit error:", data)
         return data
 
     # 여러 추천 경로 중 현재는 첫 번째 경로 사용
@@ -244,3 +245,114 @@ def get_transit(
         # 도보 / 버스 / 지하철 세부 경로
         "paths": paths
     }
+
+# 5. 도보 이동시간 계산
+def get_walking(
+    start_x,
+    start_y,
+    end_x,
+    end_y
+):
+    """
+    두 좌표 사이의 직선거리를 기준으로
+    도보 이동시간을 추정한다.
+
+    대중교통 경로가 없는 근거리 후보를
+    처리하기 위한 fallback 용도이다.
+    """
+
+    from math import radians, sin, cos, sqrt, atan2
+
+    # 위도 / 경도를 라디안으로 변환
+    lat1 = radians(float(start_y))
+    lon1 = radians(float(start_x))
+    lat2 = radians(float(end_y))
+    lon2 = radians(float(end_x))
+
+    # 지구 반지름(km)
+    earth_radius = 6371.0
+
+    # 두 좌표의 차이
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Haversine 공식으로 직선거리 계산
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(lat1)
+        * cos(lat2)
+        * sin(dlon / 2) ** 2
+    )
+
+    c = 2 * atan2(
+        sqrt(a),
+        sqrt(1 - a)
+    )
+
+    distance_km = earth_radius * c
+
+    # 실제 보행거리는 직선거리보다 길기 때문에
+    # 보정계수 1.2를 적용한다.
+    walking_distance_km = distance_km * 1.2
+
+    # 평균 보행속도 4.5 km/h 기준
+    walking_minutes = (
+        walking_distance_km / 4.5
+    ) * 60
+
+    return {
+        "mode": "walk",
+        "distance_km": round(
+            walking_distance_km,
+            2
+        ),
+        "duration_min": max(
+            1,
+            round(walking_minutes)
+        )
+    }
+
+# 6. 두 지점이 도보 fallback을 사용할 수 있을 정도로 가까운지 확인
+def is_nearby(
+    start_x,
+    start_y,
+    end_x,
+    end_y,
+    max_distance_km=1.5
+):
+    """
+    두 좌표의 직선거리를 계산하여
+    도보 fallback이 가능한 근거리인지 판단한다.
+
+    기본 기준:
+    - 직선거리 1.5km 이하 → 근거리
+    - 직선거리 1.5km 초과 → 근거리 아님
+    """
+
+    from math import radians, sin, cos, sqrt, atan2
+
+    lat1 = radians(float(start_y))
+    lon1 = radians(float(start_x))
+    lat2 = radians(float(end_y))
+    lon2 = radians(float(end_x))
+
+    earth_radius = 6371.0
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(lat1)
+        * cos(lat2)
+        * sin(dlon / 2) ** 2
+    )
+
+    c = 2 * atan2(
+        sqrt(a),
+        sqrt(1 - a)
+    )
+
+    distance_km = earth_radius * c
+
+    return distance_km <= max_distance_km

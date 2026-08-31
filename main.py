@@ -17,6 +17,8 @@ from candidate_filter import (
     calculate_available_stay_minutes,
     check_duration_feasibility,
     classify_travel_time,
+    preselect_candidates_by_detour,
+    
 )
 
 from activity_score import load_poi_activity_scores
@@ -95,27 +97,80 @@ def recommend(request: RecommendRequest):
     time_window = calculate_time_window(
         resolved_datetimes
     )
+    
+    # 9. 전체 POI를 불러온 뒤 우회거리 기준으로 1차 후보를 선별한다.
+    all_candidates = load_poi_candidates()
 
-    # 9. 실제 POI 테스트
-    # 현재는 전체 121개 중 앞의 5개만 사용한다.이후 우회거리 기반 사전선별 + Ranking으로 교체할 예정이다.
-    real_candidates = load_poi_candidates()[:5]
-
-    # 현재 지도 API 테스트를 위해 시작점과 종료점을 사당역 / 잠실역으로 고정한다.
+    # 현재 테스트를 위해 시작점과 종료점을 사당역 / 잠실역으로 고정한다.
     test_start = search_location("사당역")
     test_end = search_location("잠실역")
 
-    # 각 후보의 상세 계산 결과
-    real_candidate_results = []
+    # 전체 121개 POI 중 동선에서 크게 벗어나지 않는 후보 20개를 먼저 선별한다.
+    real_candidates = preselect_candidates_by_detour(
+        candidates=all_candidates,
+        start_latitude=float(test_start["y"]),
+        start_longitude=float(test_start["x"]),
+        end_latitude=float(test_end["y"]),
+        end_longitude=float(test_end["x"]),
+        limit=20,
+    )
 
-    # 최종 분류 결과
-    recommended_candidates = []
-    extended_candidates = []
-    excluded_candidates = []
+    # 우회거리로 선별된 후보에 활동 적합도 점수를 연결해 확인한다.
+    activity_scores = load_poi_activity_scores()
 
-    # 10. 후보 POI별 실제 이동시간 및 체류 가능시간 계산
-    for candidate in real_candidates:
+    selected_area_codes = [
+        candidate["AREA_CD"]
+        for candidate in real_candidates
+    ]
 
-        # 시작 위치 → 후보 POI 실제 대중교통 이동시간
+    selected_activity_scores = activity_scores[
+        activity_scores["AREA_CD"].isin(selected_area_codes)
+    ]
+
+    detour_distance_map = {
+        candidate["AREA_CD"]: candidate["detour_distance_km"]
+        for candidate in real_candidates
+    }
+    candidate_location_map = {
+        candidate["AREA_CD"]: {
+            "latitude": candidate["latitude"],
+            "longitude": candidate["longitude"],
+        }
+        for candidate in real_candidates
+    }
+    activity_test_results = []
+
+    for _, row in selected_activity_scores.iterrows():
+        activity_test_results.append({
+            "AREA_CD": row["AREA_CD"],
+            "AREA_NM": row["AREA_NM"],
+            "latitude": candidate_location_map[row["AREA_CD"]]["latitude"],
+            "longitude": candidate_location_map[row["AREA_CD"]]["longitude"],
+            "detour_distance_km": detour_distance_map[row["AREA_CD"]],
+            "cafe_score": row["cafe_score"],
+            "drink_score": row["drink_score"],
+        })
+
+    # 사용자가 원하는 cafe / drink 점수의 평균을 계산한다.
+    for candidate in activity_test_results:
+        candidate["activity_match_score"] = (
+            candidate["cafe_score"]
+            + candidate["drink_score"]
+        ) / 2
+
+    # 활동 적합도가 높은 순서대로 정렬한다.
+    activity_test_results.sort(
+        key=lambda candidate: candidate["activity_match_score"],
+        reverse=True
+    )
+
+    # 활동 적합도가 높은 상위 5개를
+    # 실제 대중교통 이동시간을 확인할 예비 후보로 선정한다.
+    api_candidates = activity_test_results[:5]
+
+    # 상위 5개 후보의 실제 대중교통 이동시간을 확인한다.
+    for candidate in api_candidates:
+
         start_to_candidate = get_transit(
             test_start["x"],
             test_start["y"],
@@ -123,7 +178,6 @@ def recommend(request: RecommendRequest):
             candidate["latitude"]
         )
 
-        # 후보 POI → 다음 일정 위치 실제 대중교통 이동시간
         candidate_to_end = get_transit(
             candidate["longitude"],
             candidate["latitude"],
@@ -131,81 +185,52 @@ def recommend(request: RecommendRequest):
             test_end["y"]
         )
 
-        # 전체 시간에서 이동시간과 버퍼를 제외한
-        # 실제 후보지역 체류 가능시간 계산
-        available_stay_minutes = calculate_available_stay_minutes(
-            time_window["time_window_minutes"],
-            start_to_candidate["duration_min"],
+        candidate["start_to_candidate_travel_minutes"] = (
+            start_to_candidate["duration_min"]
+        )
+
+        candidate["candidate_to_end_travel_minutes"] = (
             candidate_to_end["duration_min"]
         )
 
-        # 사용자가 원하는 체류시간을 확보할 수 있는지 검사
-        duration_feasibility = check_duration_feasibility(
-            available_stay_minutes,
-            mock_conditions.desired_duration_minutes
-        )
-
-        # 전체 시간 중 이동시간이 차지하는 비율을 기준으로
-        # normal / penalty / extended 분류
-        travel_time_classification = classify_travel_time(
-            time_window["time_window_minutes"],
-            start_to_candidate["duration_min"],
-            candidate_to_end["duration_min"]
-        )
-
-        # 후보별 계산 결과 저장
-        real_candidate_results.append({
-            "AREA_CD": candidate["AREA_CD"],
-            "AREA_NM": candidate["AREA_NM"],
-            "CATEGORY": candidate["CATEGORY"],
-            "start_to_candidate_travel_minutes":
+        candidate["available_stay_minutes"] = (
+            calculate_available_stay_minutes(
+                time_window["time_window_minutes"],
                 start_to_candidate["duration_min"],
-            "candidate_to_end_location_travel_minutes":
-                candidate_to_end["duration_min"],
-            "available_stay_minutes":
-                available_stay_minutes,
-            "duration_feasibility":
-                duration_feasibility,
-            "travel_time_classification":
-                travel_time_classification
-        })
-
-        # 11. 체류 가능 여부와 이동부담에 따라 후보 분류
-
-        # 희망 체류시간 확보 불가능 → 추천 제외
-        if duration_feasibility["is_feasible"] is False:
-            excluded_candidates.append(
-                candidate["AREA_NM"]
+                candidate_to_end["duration_min"]
             )
-
-        # 체류는 가능하지만 이동시간 비율이 40% 초과
-        # → 확장 후보로 분류
-        elif (
-            travel_time_classification["travel_level"]
-            == "extended"
-        ):
-            extended_candidates.append(
-                candidate["AREA_NM"]
+        )
+        candidate["duration_feasibility"] = (
+            check_duration_feasibility(
+                candidate["available_stay_minutes"],
+                mock_conditions.desired_duration_minutes
             )
+        )
+        candidate["travel_time_classification"] = (
+            classify_travel_time(
+                time_window["time_window_minutes"],
+                start_to_candidate["duration_min"],
+                candidate_to_end["duration_min"]
+            )
+        )
+    recommended_candidates = []
+    extended_candidates = []
+    excluded_candidates = []
 
-        # 체류 가능 + 이동부담도 허용 범위
-        # → 일반 추천 후보
+    for candidate in api_candidates:
+
+        if not candidate["duration_feasibility"]["is_feasible"]:
+            excluded_candidates.append(candidate)
+
+        elif candidate["travel_time_classification"]["travel_level"] == "extended":
+            extended_candidates.append(candidate)
+
         else:
-            recommended_candidates.append(
-                candidate["AREA_NM"]
-            )
-
-    # 12. 현재 추천 파이프라인 테스트 결과 반환
+            recommended_candidates.append(candidate)
     return {
-        "conditions": mock_conditions,
-        "start_location": resolved_start_location,
-        "start_time": resolved_start_time,
-        "end_location": resolved_end_location,
-        "end_time": resolved_end_time,
-        "resolved_datetimes": resolved_datetimes,
-        "time_window": time_window,
-        "real_candidate_results": real_candidate_results,
+        "activity_test_results": activity_test_results,
+        "api_candidates": api_candidates,
         "recommended_candidates": recommended_candidates,
         "extended_candidates": extended_candidates,
-        "excluded_candidates": excluded_candidates,
+        "excluded_candidates": excluded_candidates
     }

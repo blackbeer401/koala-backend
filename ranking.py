@@ -38,22 +38,35 @@ def convert_travel_ratio_to_score(
 def calculate_final_score(
     activity_score: float,
     congestion_score: float,
-    travel_score: float
+    travel_score: float,
+    has_activity: bool = True
 ):
     """
     활동 적합도, 혼잡도, 이동 부담 점수를
     가중합하여 최종 추천 점수를 계산한다.
 
-    활동 적합도: 50%
-    이동 부담: 30%
-    혼잡도: 20%
+    활동이 지정된 경우:
+    - 활동 적합도: 50%
+    - 이동 부담: 30%
+    - 혼잡도: 20%
+
+    활동이 지정되지 않은 경우:
+    - 이동 부담: 60%
+    - 혼잡도: 40%
     """
 
-    final_score = (
-        activity_score * 0.5
-        + travel_score * 0.3
-        + congestion_score * 0.2
-    )
+    if has_activity:
+        final_score = (
+            activity_score * 0.5
+            + travel_score * 0.3
+            + congestion_score * 0.2
+        )
+
+    else:
+        final_score = (
+            travel_score * 0.6
+            + congestion_score * 0.4
+        )
 
     return final_score
 

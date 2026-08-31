@@ -54,7 +54,7 @@ def parse_user_intent(
 
     # OPENAI_API_KEY 환경변수를 자동으로 사용
     client = OpenAI()
-
+    
     # LLM 호출
     response = client.responses.create(
         model=MODEL,
@@ -158,3 +158,42 @@ if __name__ == "__main__":
 
     print("\n=== StructuredConditions 변환 결과 ===")
     print(conditions.model_dump())
+
+
+def generate_recommendation_message(
+    user_message: str,
+    recommendation_result: dict
+):
+    """
+    백엔드가 계산한 추천 결과를 이용해
+    사용자에게 보여줄 자연어 추천 문장을 생성한다.
+    """
+
+    prompt = f"""
+너는 지역 추천 서비스의 최종 추천 결과를 사용자에게 설명하는 역할이다.
+
+사용자가 입력한 내용:
+{user_message}
+
+백엔드가 계산한 추천 결과:
+{recommendation_result}
+
+규칙:
+- 추천 지역과 점수는 백엔드 계산 결과를 그대로 사용한다.
+- 새로운 지역을 임의로 추가하지 않는다.
+- 점수를 이용해 지역의 순위를 다시 계산하거나 변경하지 않는다.
+- current_area가 있으면 반드시 현재 지역을 가장 먼저 안내한다.
+- other_areas는 제공된 배열 순서대로 그다음 대안으로 안내한다.
+- extended_areas는 이동 부담이 큰 추가 선택지로만 안내한다.
+- current_area보다 other_areas의 점수가 높더라도 "가장 추천", "1순위" 등으로 표현하지 않는다.
+- 이동시간, 혼잡도, 활동 적합도 등 제공된 정보만 사용한다.
+- 사용자에게 자연스럽고 간결한 한국어로 설명한다.
+"""
+    
+    client = OpenAI()
+    response = client.responses.create(
+        model=MODEL,
+        input=prompt
+    )
+
+    return response.output_text

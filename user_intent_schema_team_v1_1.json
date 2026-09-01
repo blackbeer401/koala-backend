@@ -6,6 +6,8 @@
   "additionalProperties": false,
   "required": [
     "start_location_text",
+    "target_location_text",
+    "target_location_scope",
     "end_location_text",
     "start_time",
     "end_time",
@@ -26,6 +28,16 @@
         "string",
         "null"
       ]
+    },
+    "target_location_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target_location_scope": {
+      "type": ["string", "null"],
+      "enum": ["area", "place", null]
     },
     "end_location_text": {
       "type": [

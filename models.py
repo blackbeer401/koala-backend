@@ -62,9 +62,6 @@ class StructuredConditions(BaseModel):
     """
     사용자의 자연어 요청을 추천 계산에 사용할 수 있도록
     구조화한 조건을 저장한다.
-
-    현재 main.py에서는 아직 LLM 추출 기능을 연결하지 않아
-    mock_conditions로 직접 생성해서 테스트하고 있다.
     """
 
     # 추천을 시작할 별도 위치
@@ -77,6 +74,39 @@ class StructuredConditions(BaseModel):
     # "5시에 사당에서 출발할 거야"
     # → "사당" 저장
     start_location_text: str | None = None
+
+    # 사용자가 실제로 추천 활동을 하고 싶은 지역
+    #
+    # 추천 활동 자체의 목적 지역을 의미
+    #
+    # 예:
+    # "오늘 강남에서 2~3시간 놀 거야"
+    # → "강남" 저장
+    #
+    # "홍대에서 놀다가 7시에 잠실 가야 해"
+    # → "홍대" 저장
+    #
+    # 다음 일정 위치와는 구분
+    # "7시에 강남에서 약속 있어. 그전에 카페 갈래"
+    # → target_location_text = None
+    # → end_location_text = "강남"
+    target_location_text: str | None = None
+
+        # target_location_text가 넓은 지역인지
+    # 특정 장소인지 구분
+    #
+    # area:
+    # "강남에서 놀고 싶어"
+    # "홍대에서 카페 가고 싶어"
+    #
+    # place:
+    # "강남역에서 놀고 싶어"
+    # "홍대입구에서 놀고 싶어"
+    # "서울숲에서 산책하고 싶어"
+    #
+    # target_location_text가 None이면
+    # target_location_scope도 None
+    target_location_scope: str | None = None
 
     # 다음 일정 위치
     # 예: "7시에 잠실 가야 해" → "잠실"

@@ -18,6 +18,7 @@ from poi import load_poi_candidates
 
 from conditions import (
     resolve_start_location,
+    resolve_target_location,
     resolve_start_time,
     resolve_end_location,
     resolve_end_time,
@@ -94,8 +95,13 @@ def recommend(request: RecommendRequest):
         request,
         conditions
     )
+    # 6. 사용자가 실제로 활동하고 싶은 목적 지역 결정
+    # 사용자가 특정 지역을 지정하지 않았다면 missing으로 처리한다.
+    resolved_target_location = resolve_target_location(
+        conditions
+    )
 
-    # 6. 시작시간 / 종료위치 / 종료시간 결정
+    # 7. 시작시간 / 종료위치 / 종료시간 결정
     resolved_start_time = resolve_start_time(
         conditions
     )
@@ -108,18 +114,18 @@ def recommend(request: RecommendRequest):
         conditions
     )
 
-    # 7. 시작시간과 종료시간을 실제 datetime으로 변환
+    # 8. 시작시간과 종료시간을 실제 datetime으로 변환
     resolved_datetimes = resolve_datetimes(
         resolved_start_time,
         resolved_end_time
     )
 
-    # 8. 사용자가 실제로 사용할 수 있는 전체 시간 계산
+    # 9. 사용자가 실제로 사용할 수 있는 전체 시간 계산
     time_window = calculate_time_window(
         resolved_datetimes
     )
     
-    # 9. 전체 POI를 불러온 뒤 우회거리 기준으로 1차 후보를 선별한다.
+    # 10. 전체 POI를 불러온 뒤 우회거리 기준으로 1차 후보를 선별한다.
     all_candidates = load_poi_candidates()
 
     # 실제 시작 위치를 좌표 형태로 변환한다.
@@ -145,24 +151,45 @@ def recommend(request: RecommendRequest):
             "error": "start_location_missing",
             "message": "시작 위치 정보가 필요합니다."
         }
-    
-    # 현재 자유시간 시작 위치와 가장 가까운 121 POI를 확인한다.
-    nearest_start_candidates = preselect_candidates_by_distance(
-        candidates=all_candidates,
-        start_latitude=float(start_location["y"]),
-        start_longitude=float(start_location["x"]),
-        limit=1,
-    )
 
+    # 사용자가 실제로 활동하고 싶은 목적 지역을 좌표 형태로 변환한다.
+    if resolved_target_location["source"] == "text":
+        target_location = search_location(
+            resolved_target_location["location_text"]
+        )
+        print("TARGET 지도검색 결과:", target_location)
+
+        # 지도 검색으로 목적 지역을 찾지 못한 경우
+        if target_location is None:
+            return {
+                "error": "target_location_not_found",
+                "message": "활동 목적 지역을 찾을 수 없습니다."
+            }
+
+    else:
+        target_location = None
+
+    # 현재 지역 추천 후보 초기화
     current_area_candidate = None
 
-    if nearest_start_candidates:
-        nearest_candidate = nearest_start_candidates[0]
+    # 사용자가 활동할 목적 지역을 따로 지정하지 않은 경우에만
+    # 현재 위치와 가까운 지역을 현재 지역 추천 후보로 확인한다.
+    if target_location is None:
 
-        # MVP에서는 POI 중심좌표와 1km 이내일 경우
-        # 현재 지역에 있다고 임시 판단한다.
-        if nearest_candidate["start_to_candidate_km"] <= 1.0:
-            current_area_candidate = nearest_candidate
+        nearest_start_candidates = preselect_candidates_by_distance(
+            candidates=all_candidates,
+            start_latitude=float(start_location["y"]),
+            start_longitude=float(start_location["x"]),
+            limit=1,
+        )
+
+        if nearest_start_candidates:
+            nearest_candidate = nearest_start_candidates[0]
+
+            # MVP에서는 POI 중심좌표와 1km 이내일 경우
+            # 현재 지역에 있다고 임시 판단한다.
+            if nearest_candidate["start_to_candidate_km"] <= 1.0:
+                current_area_candidate = nearest_candidate
 
 
     # 실제 종료 위치를 좌표 형태로 변환한다.
@@ -179,8 +206,69 @@ def recommend(request: RecommendRequest):
     else:
         end_location = None
 
-    # 종료지가 있는 경우 → 시작-후보-종료 우회거리 기준
-    if end_location is not None:
+    # 사용자가 활동할 목적 지역을 지정한 경우
+    # target 주변의 여러 POI를 1차 후보로 가져온다.
+    target_area_candidate = None
+    target_area_candidates = []
+
+    if target_location is not None:
+       
+
+        target_location_scope = conditions.target_location_scope
+
+
+        if target_location_scope == "place":
+            # 사용자가 특정 장소를 지정한 경우
+            # 지도 검색으로 찾은 실제 위치와 가장 가까운
+            # 121개 POI 하나를 대표 지역으로 사용한다.
+            nearest_target_candidates = preselect_candidates_by_distance(
+                candidates=all_candidates,
+                start_latitude=float(target_location["y"]),
+                start_longitude=float(target_location["x"]),
+                limit=1,
+            )
+
+        else:
+            # 사용자가 강남, 홍대처럼 넓은 지역을 지정한 경우
+            # 해당 지역 주변 여러 POI를 후보로 만든 뒤
+            # 이후 활동 적합도, 이동시간, 혼잡도 등을 함께 평가한다.
+            nearest_target_candidates = preselect_candidates_by_distance(
+                candidates=all_candidates,
+                start_latitude=float(target_location["y"]),
+                start_longitude=float(target_location["x"]),
+                limit=10,
+            )
+
+        # 이 시점의 start_to_candidate_km는
+        # 실제 시작 위치가 아니라 target → 후보 거리이므로
+        # 별도 필드로 보존한다.
+        for candidate in nearest_target_candidates:
+            candidate["target_to_candidate_km"] = (
+                candidate["start_to_candidate_km"]
+            )
+
+        # 실제 시작 위치 → 후보 거리도 다시 계산한다.
+        if nearest_target_candidates:
+
+            target_area_candidates = preselect_candidates_by_distance(
+                candidates=nearest_target_candidates,
+                start_latitude=float(start_location["y"]),
+                start_longitude=float(start_location["x"]),
+                limit=len(nearest_target_candidates),
+            )
+
+
+
+
+    # 사용자가 활동할 목적 지역을 직접 지정한 경우
+    # 해당 목적 지역만 추천 후보로 사용한다.
+    if target_area_candidates:
+        real_candidates = target_area_candidates
+
+
+    # 목적 지역을 따로 지정하지 않았고 종료지가 있는 경우
+    # 시작 → 후보 → 종료 우회거리 기준으로 후보를 선별한다.
+    elif end_location is not None:
         real_candidates = preselect_candidates_by_detour(
             candidates=all_candidates,
             start_latitude=float(start_location["y"]),
@@ -190,7 +278,8 @@ def recommend(request: RecommendRequest):
             limit=20,
         )
 
-    # 종료지가 없는 경우 → 시작 위치와 가까운 거리 기준
+    # 목적 지역도 없고 종료지도 없는 경우
+    # 시작 위치와 가까운 거리 기준으로 후보를 선별한다.
     else:
         real_candidates = preselect_candidates_by_distance(
             candidates=all_candidates,
@@ -198,7 +287,6 @@ def recommend(request: RecommendRequest):
             start_longitude=float(start_location["x"]),
             limit=20,
         )
-        
 
     # 우회거리로 선별된 후보에 활동 적합도 점수를 연결해 확인한다.
     activity_scores = load_poi_activity_scores()
@@ -406,6 +494,7 @@ def recommend(request: RecommendRequest):
         candidate["AREA_CD"]: {
             "detour_distance_km": candidate.get("detour_distance_km"),
             "start_to_candidate_km": candidate.get("start_to_candidate_km"),
+            "target_to_candidate_km": candidate.get("target_to_candidate_km"),
         }
         for candidate in real_candidates
     }
@@ -426,6 +515,7 @@ def recommend(request: RecommendRequest):
             "longitude": candidate_location_map[row["AREA_CD"]]["longitude"],
             "detour_distance_km": distance_map[row["AREA_CD"]]["detour_distance_km"],
             "start_to_candidate_km": distance_map[row["AREA_CD"]]["start_to_candidate_km"],
+            "target_to_candidate_km": distance_map[row["AREA_CD"]]["target_to_candidate_km"],
             "food_score": int(row["food_score"]),
             "cafe_score": int(row["cafe_score"]),
             "drink_score": int(row["drink_score"]),
@@ -674,6 +764,17 @@ def recommend(request: RecommendRequest):
         reverse=True
     )
 
+    # 사용자가 활동 목적 지역을 지정한 경우
+    # 모든 평가를 통과한 후보 중 최종점수가 가장 높은 지역을
+    # 최종 target 지역으로 선정한다.
+    if target_location is not None:
+
+        if recommended_candidates:
+            target_area_candidate = recommended_candidates[0]
+        else:
+            target_area_candidate = None
+
+
     # 이동 부담이 큰 확장 후보는
     # 총 이동시간이 짧은 후보를 우선하고,
     # 이동시간이 같으면 최종 추천점수가 높은 후보를 우선한다.
@@ -683,29 +784,31 @@ def recommend(request: RecommendRequest):
             -candidate["final_score"]
         )
     )
-
-    # 최종 추천지역 상위 3개를 선정한다.
-    # 현재 지역은 "현재 지역 우선 추천"으로 따로 보여주기 때문에
-    # 다른 지역 추천 목록에서는 제외한다.
+    # 사용자가 활동 목적 지역을 따로 지정하지 않은 경우에만
+    # 기존 방식대로 다른 추천 지역 상위 3개를 선정한다.
     other_area_candidates = []
 
-    for candidate in recommended_candidates:
+    if target_location is None:
 
-        if (
-            current_area_candidate is not None
-            and candidate["AREA_CD"] == current_area_candidate["AREA_CD"]
-        ):
-            continue
+        for candidate in recommended_candidates:
 
-        other_area_candidates.append(candidate)
+            # 현재 지역은 별도로 보여주므로
+            # 다른 지역 추천 목록에서는 제외한다.
+            if (
+                current_area_candidate is not None
+                and candidate["AREA_CD"] == current_area_candidate["AREA_CD"]
+            ):
+                continue
 
-        if len(other_area_candidates) >= 3:
-            break
+            other_area_candidates.append(candidate)
 
+            if len(other_area_candidates) >= 3:
+                break
 
     # 추천 가능한 지역이 하나도 없는 경우
     if (
-        current_area_candidate is None
+        target_area_candidate is None
+        and current_area_candidate is None
         and not other_area_candidates
         and not extended_candidates
     ):
@@ -714,20 +817,34 @@ def recommend(request: RecommendRequest):
             "message": "현재 조건에서 추천 가능한 지역을 찾지 못했습니다."
         }
 
-    recommendation_result = {
-        "current_area": current_area_candidate,
-        "other_areas": other_area_candidates,
-        "extended_areas": extended_candidates,
-    }
+    # 사용자가 활동 목적 지역을 직접 지정한 경우
+    if target_location is not None:
+        recommendation_result = {
+            "target_area": target_area_candidate,
+            "current_area": None,
+            "other_areas": [],
+            "extended_areas": extended_candidates,
+        }
+
+    # 활동 목적 지역을 지정하지 않은 경우
+    # 기존 지역 추천 결과를 그대로 사용한다.
+    else:
+        recommendation_result = {
+            "target_area": None,
+            "current_area": current_area_candidate,
+            "other_areas": other_area_candidates,
+            "extended_areas": extended_candidates,
+        }
 
     recommendation_message = generate_recommendation_message(
         user_message=request.user_message,
         recommendation_result=recommendation_result
-    )            
-    
+    )
+
     return {
         "recommendation_message": recommendation_message,
-        "current_area": current_area_candidate,
-        "other_areas": other_area_candidates,
-        "extended_areas": extended_candidates,
+        "target_area": recommendation_result["target_area"],
+        "current_area": recommendation_result["current_area"],
+        "other_areas": recommendation_result["other_areas"],
+        "extended_areas": recommendation_result["extended_areas"],
     }

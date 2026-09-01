@@ -49,10 +49,12 @@ Runtime Context가 제공되지 않았는데 현재시각 계산이 필요한 �
 - 허용값에 없는 새로운 카테고리 생성
 
 ## 출력 구조
-항상 아래 14개 키를 정확히 모두 출력합니다.
+항상 아래 16개 키를 정확히 모두 출력합니다.
 
 {
   "start_location_text": null,
+  "target_location_text": null,
+  "target_location_scope": null,
   "end_location_text": null,
   "start_time": null,
   "end_time": null,
@@ -77,7 +79,6 @@ Runtime Context가 제공되지 않았는데 현재시각 계산이 필요한 �
 
 - "5시에 사당에 있을 거야" -> "사당"
 - "6시에 강남에서 일정 끝나" -> "강남"
-- "점심쯤 성수에 갈 건데 할 거 추천해줘" -> "성수"
 
 현재 위치만 말한 경우에는 GPS가 우선이므로 null입니다.
 
@@ -85,6 +86,69 @@ Runtime Context가 제공되지 않았는데 현재시각 계산이 필요한 �
 - "현재 홍대야" -> null
 
 별도 시작 위치가 없으면 null입니다.
+
+### target_location_text
+사용자가 이번 추천 활동을 실제로 하고 싶다고 명확하게 지정한 지역을 추출합니다.
+
+이 필드는 추천 활동 이후 반드시 가야 하는 위치가 아니라,
+이번 추천 활동 자체를 할 목적 지역을 의미합니다.
+
+- "오늘 강남에서 2~3시간 놀 거야" -> "강남"
+- "홍대에서 카페 가고 싶어" -> "홍대"
+- "성수에서 놀다가 저녁에 잠실 가야 해" -> "성수"
+
+사용자가 특정 활동 지역을 지정하지 않았다면 null입니다.
+
+다음 일정 위치와 혼동하지 않습니다.
+
+- "7시에 강남에서 약속 있어. 그 전에 카페 갈래"
+  -> target_location_text = null
+  -> end_location_text = "강남"
+
+- "홍대에서 2시간 놀다가 7시에 잠실 가야 해"
+  -> target_location_text = "홍대"
+  -> end_location_text = "잠실"
+
+### target_location_scope
+target_location_text가 있을 때,
+사용자가 지정한 위치가 넓은 활동 지역인지 특정 장소인지 구분합니다.
+
+허용값:
+- "area"
+- "place"
+- null
+
+"area":
+사용자가 특정 한 지점이 아니라 넓은 지역이나 동네 범위에서 활동하고 싶다고 말한 경우입니다.
+
+예:
+- "강남에서 놀고 싶어" -> "area"
+- "홍대에서 카페 가고 싶어" -> "area"
+- "성수에서 2시간 놀 거야" -> "area"
+
+"place":
+사용자가 특정 역, 시설, 관광지, 건물 등 명확한 한 지점을 활동 위치로 지정한 경우입니다.
+
+예:
+- "강남역에서 놀고 싶어" -> "place"
+- "홍대입구역에서 2시간 놀고 싶어" -> "place"
+- "홍대입구에서 2시간 놀고 싶어" -> "place"
+- "서울숲에서 산책하고 싶어" -> "place"
+- "경복궁에서 구경하고 싶어" -> "place"
+
+중요:
+단순히 문자열에 "역"이라는 글자가 있는지만 보고 판단하지 않습니다.
+사용자가 표현한 위치의 의미를 기준으로 판단합니다.
+
+예:
+- "강남" -> area
+- "강남역" -> place
+- "홍대" -> area
+- "홍대입구" -> place
+- "홍대입구역" -> place
+
+target_location_text가 null이면
+target_location_scope도 반드시 null입니다.
 
 ### end_location_text
 추천 활동 이후 반드시 가야 하는 위치를 추출합니다.
@@ -95,6 +159,7 @@ Runtime Context가 제공되지 않았는데 현재시각 계산이 필요한 �
 없으면 null입니다.
 
 ---
+
 
 ## 2. 정확한 시간
 
@@ -107,6 +172,7 @@ Runtime Context가 제공되지 않았는데 현재시각 계산이 필요한 �
 
 "지금부터"처럼 현재부터 바로 시작한다는 의미만 있으면 start_time은 null입니다.
 현재 시각은 Backend가 이미 알고 있으므로 "지금" 자체를 HH:MM으로 복사하지 않습니다.
+
 
 ### end_time
 다음 일정 또는 사용자의 가용 시간창이 끝나는 정확한 시각을 HH:MM으로 반환합니다.
@@ -488,6 +554,8 @@ space_preference는 사용자가 말한 의도/선호를 보존하는 필드입�
 사용자가 말하지 않은 정보는 임의 추정하지 않습니다.
 
 - start_location_text: null
+- target_location_text: null
+- target_location_scope: null
 - end_location_text: null
 - start_time: null
 - end_time: null
@@ -509,6 +577,6 @@ space_preference는 사용자가 말한 의도/선호를 보존하는 필드입�
 - JSON 객체 하나만 출력
 - Markdown 코드블록 금지
 - 설명 문장 금지
-- 반드시 14개 키 모두 포함
+- 반드시 16개 키 모두 포함
 - 추가 키 금지
 - 실제 전달된 JSON Schema가 있으면 그 Schema를 최우선으로 준수

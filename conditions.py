@@ -46,9 +46,42 @@ def resolve_start_location(
         "latitude": None,
         "longitude": None
     }
+# 2. 사용자가 실제로 활동하고 싶은 목적 지역 결정
+def resolve_target_location(
+    conditions: StructuredConditions
+):
+    """
+    사용자가 이번 추천 활동을 하고 싶다고 지정한 지역을 결정한다.
 
+    예:
+    "오늘 강남에서 2~3시간 놀 거야"
+    → target_location_text = "강남"
 
-# 2. 추천 계산에 사용할 시작시간 결정
+    "홍대에서 놀다가 7시에 잠실 가야 해"
+    → target_location_text = "홍대"
+
+    사용자가 활동 지역을 따로 지정하지 않았다면
+    target_location은 없는 것으로 처리한다.
+    """
+
+    # 사용자가 활동할 지역을 직접 지정한 경우
+    if conditions.target_location_text is not None:
+        return {
+            "source": "text",
+            "location_text": conditions.target_location_text,
+            "latitude": None,
+            "longitude": None
+        }
+
+    # 활동 지역을 따로 지정하지 않은 경우
+    return {
+        "source": "missing",
+        "location_text": None,
+        "latitude": None,
+        "longitude": None
+    }
+
+# 3. 추천 계산에 사용할 시작시간 결정
 def resolve_start_time(
     conditions: StructuredConditions
 ):
@@ -75,7 +108,7 @@ def resolve_start_time(
     }
 
 
-# 3. 다음 일정 위치 결정
+# 4. 다음 일정 위치 결정
 def resolve_end_location(
     conditions: StructuredConditions
 ):
@@ -104,7 +137,7 @@ def resolve_end_location(
     }
 
 
-# 4. 종료시간 또는 다음 일정시간 결정
+# 5. 종료시간 또는 다음 일정시간 결정
 def resolve_end_time(
     conditions: StructuredConditions
 ):
@@ -127,7 +160,7 @@ def resolve_end_time(
     }
 
 
-# 5. HH:MM 형태의 시간을 실제 datetime으로 변환
+# 6. HH:MM 형태의 시간을 실제 datetime으로 변환
 def resolve_datetimes(
     start_time: dict,
     end_time: dict
@@ -195,7 +228,7 @@ def resolve_datetimes(
     }
 
 
-# 6. 사용 가능한 전체 시간 계산
+# 7. 사용 가능한 전체 시간 계산
 def calculate_time_window(
     resolved_datetimes: dict
 ):

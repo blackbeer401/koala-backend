@@ -157,7 +157,6 @@ def recommend(request: RecommendRequest):
         target_location = search_location(
             resolved_target_location["location_text"]
         )
-        print("TARGET 지도검색 결과:", target_location)
 
         # 지도 검색으로 목적 지역을 찾지 못한 경우
         if target_location is None:

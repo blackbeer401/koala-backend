@@ -113,8 +113,164 @@ def search_location(query: str):
     # 장소명과 주소 모두 검색되지 않은 경우
     return None
 
+# 4. 좌표 기준 주변 장소 카테고리 검색
+def search_places_by_category(
+    latitude: float,
+    longitude: float,
+    category_code: str,
+    radius: int = 2000,
+    size: int = 15,
+):
+    """
+    특정 좌표를 기준으로 주변 장소를
+    Kakao Local API 카테고리 검색으로 조회한다.
 
-# 4. 대중교통 경로 조회
+    주요 카테고리 코드:
+    - FD6: 음식점
+    - CE7: 카페
+    - CT1: 문화시설
+    - AT4: 관광명소
+    - AD5: 숙박
+
+    radius는 검색 반경이며 단위는 m이다.
+    기본값은 2000m(2km)이다.
+
+    반환 결과는 기준 좌표와 가까운 순서로 정렬한다.
+    """
+
+    url = (
+        "https://dapi.kakao.com/"
+        "v2/local/search/category.json"
+    )
+
+    params = {
+        "category_group_code": category_code,
+
+        # x = 경도
+        "x": longitude,
+
+        # y = 위도
+        "y": latitude,
+
+        # 검색 반경(m)
+        "radius": radius,
+
+        # 한 번에 받을 장소 수
+        "size": size,
+
+        # 기준 좌표와 가까운 순서
+        "sort": "distance",
+    }
+
+    response = requests.get(
+        url,
+        headers=kakao_headers(),
+        params=params,
+        timeout=10,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    return data.get(
+        "documents",
+        []
+    )
+
+# 5. 좌표 → 행정구역 변환
+def get_region_from_coordinates(
+    latitude: float,
+    longitude: float,
+):
+    """
+    위도 / 경도를 기준으로 해당 위치의 행정구역을 조회한다.
+
+    Kakao Local API의 좌표 → 행정구역 변환 기능을 사용한다.
+
+    반환 예시:
+    {
+        "sido_name": "서울특별시",
+        "sigungu_name": "마포구",
+        "dong_name": "서교동",
+        "region_code": "1144066000"
+    }
+
+    행정동(H) 정보를 우선 사용하며,
+    행정동 결과가 없는 경우 첫 번째 검색 결과를 사용한다.
+
+    주의:
+    region_code는 Kakao가 반환하는 행정구역 코드이며
+    TourAPI의 signguCd와 동일한 값이라고 가정하지 않는다.
+    """
+
+    url = (
+        "https://dapi.kakao.com/"
+        "v2/local/geo/coord2regioncode.json"
+    )
+
+    params = {
+        # x = 경도(Longitude)
+        "x": longitude,
+
+        # y = 위도(Latitude)
+        "y": latitude,
+    }
+
+    response = requests.get(
+        url,
+        headers=kakao_headers(),
+        params=params,
+        timeout=10,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    documents = data.get(
+        "documents",
+        []
+    )
+
+    # 행정구역 검색 결과가 없는 경우
+    if not documents:
+        return None
+
+    # region_type:
+    # H = 행정동
+    # B = 법정동
+    #
+    # 실제 서비스에서는 행정동 정보를 우선 사용한다.
+    region = next(
+        (
+            document
+            for document in documents
+            if document.get("region_type") == "H"
+        ),
+        documents[0],
+    )
+
+    return {
+        # 시 / 도
+        "sido_name":
+            region.get("region_1depth_name"),
+
+        # 시 / 군 / 구
+        "sigungu_name":
+            region.get("region_2depth_name"),
+
+        # 읍 / 면 / 동
+        "dong_name":
+            region.get("region_3depth_name"),
+
+        # Kakao 행정구역 코드
+        "region_code":
+            region.get("code"),
+    }
+
+
+# 6. 대중교통 경로 조회
 def get_transit(
     start_x,
     start_y,
@@ -246,7 +402,8 @@ def get_transit(
         "paths": paths
     }
 
-# 5. 도보 이동시간 계산
+
+# 7. 도보 이동시간 계산
 def get_walking(
     start_x,
     start_y,
@@ -302,17 +459,20 @@ def get_walking(
 
     return {
         "mode": "walk",
+
         "distance_km": round(
             walking_distance_km,
             2
         ),
+
         "duration_min": max(
             1,
             round(walking_minutes)
         )
     }
 
-# 6. 두 지점이 도보 fallback을 사용할 수 있을 정도로 가까운지 확인
+
+# 8. 근거리 여부 확인
 def is_nearby(
     start_x,
     start_y,
@@ -358,6 +518,7 @@ def is_nearby(
     return distance_km <= max_distance_km
 
 
+# 9. 이동수단에 따른 이동시간 계산
 def get_travel(
     start_x,
     start_y,
@@ -377,9 +538,11 @@ def get_travel(
 
     walk:
     - 도보
+
+    현재 지원하지 않는 이동수단이 들어오면 None을 반환한다.
     """
 
-    # 도보를 직접 선택한 경우
+    # 9-1. 도보를 직접 선택한 경우
     if transport_mode == "walk":
 
         return get_walking(
@@ -389,7 +552,7 @@ def get_travel(
             end_y
         )
 
-    # 대중교통을 직접 선택한 경우
+    # 9-2. 대중교통을 직접 선택한 경우
     if transport_mode == "public_transit":
 
         return get_transit(
@@ -399,9 +562,10 @@ def get_travel(
             end_y
         )
 
-    # auto인 경우 가까우면 도보
+    # 9-3. auto인 경우 거리에 따라 이동수단 자동 선택
     if transport_mode == "auto":
 
+        # 가까운 거리라면 도보 사용
         if is_nearby(
             start_x,
             start_y,
@@ -416,7 +580,7 @@ def get_travel(
                 end_y
             )
 
-
+        # 근거리가 아니라면 대중교통 사용
         return get_transit(
             start_x,
             start_y,

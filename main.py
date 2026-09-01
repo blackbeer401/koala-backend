@@ -2,7 +2,15 @@ from fastapi import FastAPI
 
 from datetime import datetime
 
-from models import RecommendRequest, StructuredConditions
+from time import perf_counter
+
+from place_recommendation_service import recommend_places
+
+from models import (
+    RecommendRequest,
+    StructuredConditions,
+    PlaceRecommendRequest,
+)
 
 from llm_service import (
     parse_user_intent,
@@ -81,9 +89,16 @@ def recommend(request: RecommendRequest):
 
     current_datetime = datetime.now().astimezone().isoformat()
 
+    llm_start = perf_counter()
+
     intent = parse_user_intent(
         user_input=request.user_message,
         current_datetime=current_datetime
+    )
+
+    print(
+        f"[PERFORMANCE] LLM 입력 분석: "
+        f"{perf_counter() - llm_start:.2f}초"
     )
 
     conditions = StructuredConditions(**intent)
@@ -616,6 +631,8 @@ def recommend(request: RecommendRequest):
                 break
 
     # 상위 후보의 실제 대중교통 이동시간을 확인한다.
+
+    travel_api_start = perf_counter()
     valid_api_candidates = []
 
     for candidate in api_candidates:
@@ -741,6 +758,10 @@ def recommend(request: RecommendRequest):
         )
 
         valid_api_candidates.append(candidate)
+    print(
+        f"[PERFORMANCE] 이동시간 API 전체: "
+        f"{perf_counter() - travel_api_start:.2f}초"
+    )
 
     api_candidates = valid_api_candidates
     recommended_candidates = []
@@ -835,9 +856,16 @@ def recommend(request: RecommendRequest):
             "extended_areas": extended_candidates,
         }
 
+    message_start = perf_counter()
+
     recommendation_message = generate_recommendation_message(
         user_message=request.user_message,
         recommendation_result=recommendation_result
+    )
+
+    print(
+        f"[PERFORMANCE] LLM 추천 설명 생성: "
+        f"{perf_counter() - message_start:.2f}초"
     )
 
     return {
@@ -846,4 +874,30 @@ def recommend(request: RecommendRequest):
         "current_area": recommendation_result["current_area"],
         "other_areas": recommendation_result["other_areas"],
         "extended_areas": recommendation_result["extended_areas"],
+    }
+
+# 실제 장소 추천
+@app.post("/recommend/places")
+def recommend_actual_places(
+    request: PlaceRecommendRequest
+):
+    """
+    지역 추천 이후 사용자가 선택한 지역을 기준으로
+    실제 방문 장소를 추천한다.
+    """
+
+    places = recommend_places(
+        area_name=request.area_name,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        activities=request.activities,
+        companions=request.companions,
+        budget_max=request.budget_max,
+        budget_preference=request.budget_preference,
+        space_preference=request.space_preference,
+    )
+
+    return {
+        "area_name": request.area_name,
+        "places": places,
     }

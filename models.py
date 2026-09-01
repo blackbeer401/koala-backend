@@ -257,3 +257,78 @@ class StructuredConditions(BaseModel):
             )
 
         return value
+
+# 3. 선택한 지역의 실제 장소 추천 요청
+class PlaceRecommendRequest(BaseModel):
+    """
+    지역 추천 이후,
+    사용자가 선택한 지역 안에서 실제 장소를 추천할 때 사용하는 요청 데이터.
+
+    지역 이름과 중심 좌표,
+    그리고 장소 추천에 필요한 사용자 조건을 받는다.
+    """
+
+    # 사용자가 선택한 추천 지역 이름
+    area_name: str
+
+    # 선택한 지역의 중심 위도
+    latitude: float = Field(
+        ge=-90,
+        le=90
+    )
+
+    # 선택한 지역의 중심 경도
+    longitude: float = Field(
+        ge=-180,
+        le=180
+    )
+
+    # 사용자가 원하는 활동 종류
+    activities: list[
+        Literal[
+            "food",
+            "cafe",
+            "walk",
+            "culture",
+            "entertainment",
+            "shopping",
+            "drink",
+        ]
+    ] = Field(
+        default_factory=list
+    )
+
+    # 동행인
+    companions: list[
+        Literal[
+            "solo",
+            "friend",
+            "partner",
+            "family",
+            "child",
+            "coworker",
+        ]
+    ] = Field(
+        default_factory=list
+    )
+
+    # 최대 예산
+    budget_max: int | None = Field(
+        default=None,
+        ge=0
+    )
+
+    # 예산 선호
+    budget_preference: Literal[
+        "low",
+        "medium",
+        "flexible",
+        "any",
+    ] | None = None
+
+    # 실내 / 야외 공간 선호
+    space_preference: Literal[
+        "indoor",
+        "outdoor",
+        "any",
+    ] | None = None

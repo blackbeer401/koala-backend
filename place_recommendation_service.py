@@ -2,11 +2,17 @@ from map_service import (
     get_region_from_coordinates,
     search_places_by_category,
 )
+
 from tour_service import (
     get_tour_sigungu_code,
     get_hub_places,
     add_distance_to_places,
     filter_places_by_distance,
+)
+
+from place_ranking import (
+    add_place_ranking_scores,
+    sort_places_by_score,
 )
 
 # 우리 서비스 활동 카테고리 → Kakao 장소 카테고리 코드
@@ -197,6 +203,13 @@ def normalize_tour_places(
                 "hubCtgryMclsNm"
             ),
 
+            # TourAPI에서 제공하는 중심관광지 순위
+            "hub_rank": (
+                int(place["hubRank"])
+                if place.get("hubRank")
+                else None
+            ),
+
             # 현재 사용 중인 API 응답에서는
             # 공통 주소 필드를 사용하지 않는다.
             "address": None,
@@ -265,13 +278,19 @@ def recommend_places(
         if category_code is None:
             continue
 
-        kakao_places = search_places_by_category(
-            latitude=latitude,
-            longitude=longitude,
-            category_code=category_code,
-            radius=2000,
-            size=15,
-        )
+        try:
+            kakao_places = search_places_by_category(
+                latitude=latitude,
+                longitude=longitude,
+                category_code=category_code,
+                radius=2000,
+                size=15,
+            )
+
+        except Exception:
+            # 특정 Kakao 카테고리 조회에 실패하더라도
+            # 다른 활동 및 TourAPI 후보 조회는 계속 진행한다.
+            continue
 
         normalized_kakao_places.extend(
             normalize_kakao_places(
@@ -281,14 +300,34 @@ def recommend_places(
         )
 
     # 1. 추천 지역의 좌표를 기준으로 행정구역을 확인한다.
-    region = get_region_from_coordinates(
-        latitude=latitude,
-        longitude=longitude,
-    )
+    try:
+        region = get_region_from_coordinates(
+            latitude=latitude,
+            longitude=longitude,
+        )
 
-    # 행정구역을 찾지 못한 경우 장소 추천을 진행할 수 없다.
+    except Exception:
+        # Kakao 행정구역 조회에 실패하더라도
+        # 이미 조회된 Kakao 장소 후보가 있다면
+        # 해당 후보만으로 랭킹을 계산해서 반환한다.
+        scored_places = add_place_ranking_scores(
+            normalized_kakao_places
+        )
+
+        return sort_places_by_score(
+            scored_places
+        )
+
+    # 행정구역을 찾지 못하더라도
+    # 이미 조회된 Kakao 장소 후보는 반환한다.
     if region is None:
-        return []
+        scored_places = add_place_ranking_scores(
+            normalized_kakao_places
+        )
+
+        return sort_places_by_score(
+            scored_places
+        )
 
     # 2. 행정구 이름을 TourAPI의 시군구 코드로 변환한다.
     sigungu_name = region["sigungu_name"]
@@ -297,22 +336,47 @@ def recommend_places(
         sigungu_name
     )
 
-    # TourAPI에서 지원하는 시군구 코드가 없는 경우
-    # 장소 추천을 진행하지 않는다.
+    # TourAPI에서 지원하는 시군구 코드가 없더라도
+    # 이미 조회된 Kakao 장소 후보는 반환한다.
     if tour_sigungu_code is None:
-        return []
+        scored_places = add_place_ranking_scores(
+            normalized_kakao_places
+        )
+
+        return sort_places_by_score(
+            scored_places
+        )
 
     # 3. 확인된 자치구를 기준으로 TourAPI에서
     # 실제 장소 후보를 조회한다.
-    places = get_hub_places(
-        gu_code=tour_sigungu_code,
-        base_ym="202504",
-    )
+    # TourAPI 호출에 실패하더라도
+    # 이미 조회된 Kakao 장소 후보는 유지한다.
+    try:
+        places = get_hub_places(
+            gu_code=tour_sigungu_code,
+            base_ym="202504",
+        )
 
-    # 장소 후보가 없는 경우 빈 리스트를 반환한다.
+    except Exception:
+        scored_places = add_place_ranking_scores(
+            normalized_kakao_places
+        )
+
+        return sort_places_by_score(
+            scored_places
+        )
+
+    # TourAPI 장소 후보가 없더라도
+    # 이미 조회된 Kakao 장소 후보는 반환한다.
     if not places:
-        return []
+        scored_places = add_place_ranking_scores(
+            normalized_kakao_places
+        )
 
+        return sort_places_by_score(
+            scored_places
+        )
+    
     # 4. 각 장소와 추천 지역 중심 좌표 사이의
     # 직선거리를 계산해 장소 데이터에 추가한다.
     places = add_distance_to_places(
@@ -351,4 +415,14 @@ def recommend_places(
         combined_places
     )
 
-    return unique_places
+    # 9. 장소 후보에 랭킹 점수를 추가한다.
+    scored_places = add_place_ranking_scores(
+        unique_places
+    )
+
+    # 10. 최종 장소 점수가 높은 순서대로 정렬한다.
+    ranked_places = sort_places_by_score(
+        scored_places
+    )
+
+    return ranked_places[:5]

@@ -67,7 +67,11 @@ from ranking import (
     convert_travel_minutes_to_score,
 )
 
-from stay_time_validation import validate_selected_places_stay_time
+from stay_time_validation import (
+    validate_selected_places_stay_time,
+    calculate_estimated_route_travel_minutes,
+)
+
 from course_order_optimizer import optimize_course_order
 
 
@@ -976,16 +980,57 @@ def validate_place_selection(
         ],
         request.available_time_minutes,
     )
+    estimated_travel_result = calculate_estimated_route_travel_minutes(
+        start_latitude=request.start_latitude,
+        start_longitude=request.start_longitude,
+        selected_places=selected_places,
+    )
 
+    estimated_travel_minutes = estimated_travel_result[
+        "estimated_travel_minutes"
+    ]
+
+    estimated_total_required_minutes = (
+        validation_result["total_stay_duration_minutes"]
+        + estimated_travel_minutes
+    )
+
+    estimated_minimum_required_minutes = (
+        validation_result["total_minimum_stay_duration_minutes"]
+        + estimated_travel_minutes
+    )
+    # 예상 이동시간까지 포함했을 때
+    # 현재 선택이 시간상 빡빡할 가능성이 있는지 확인한다.
+    travel_time_warning = (
+        estimated_minimum_required_minutes
+        > request.available_time_minutes
+    )
     return {
         "status": validation_result["status"],
         "selected_places": selected_places,
+
         "stay_time_validation": {
             key: value
             for key, value in validation_result.items()
             if key != "status"
         } | {
             "available_time_minutes": request.available_time_minutes,
+        },
+
+        # 선택 중 위도·경도를 이용해 계산한
+        # 대략적인 이동시간 사전검증 결과
+        "travel_time_precheck": {
+            "estimated_travel_minutes": estimated_travel_minutes,
+            "estimated_total_required_minutes": (
+                estimated_total_required_minutes
+            ),
+            "estimated_minimum_required_minutes": (
+                estimated_minimum_required_minutes
+            ),
+            "warning": travel_time_warning,
+            "estimated_order": estimated_travel_result[
+                "estimated_order"
+            ],
         },
     }
 

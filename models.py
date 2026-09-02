@@ -276,6 +276,7 @@ class PlaceRecommendMoreRequest(BaseModel):
 class SelectedPlaceRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    # 선택한 실제 장소의 활동 카테고리
     category: Literal[
         "food",
         "cafe",
@@ -285,14 +286,52 @@ class SelectedPlaceRequest(BaseModel):
         "shopping",
         "drink",
     ]
+
+    # 선택한 실제 장소의 위도
+    # 선택 중 대략적인 이동시간을 계산할 때 사용한다.
+    latitude: float = Field(
+        ge=-90,
+        le=90,
+    )
+
+    # 선택한 실제 장소의 경도
+    # 선택 중 대략적인 이동시간을 계산할 때 사용한다.
+    longitude: float = Field(
+        ge=-180,
+        le=180,
+    )
+
+    # 사용자가 해당 장소의 체류시간을 직접 지정한 경우 사용한다.
+    # 지정하지 않으면 활동별 기본 체류시간 정책을 사용한다.
     specified_duration_minutes: int | None = Field(
         default=None,
         gt=0,
     )
 
-
 class PlaceSelectionValidationRequest(BaseModel):
-    selected_places: list[SelectedPlaceRequest] = Field(min_length=1, max_length=6)
+
+    # 사용자의 현재 위치 위도
+    # 현재 위치 → 첫 번째 선택 장소의
+    # 대략적인 이동시간을 계산할 때 사용한다.
+    start_latitude: float = Field(
+        ge=-90,
+        le=90,
+    )
+
+    # 사용자의 현재 위치 경도
+    start_longitude: float = Field(
+        ge=-180,
+        le=180,
+    )
+
+    # 사용자가 현재 선택한 실제 장소 목록
+    # KOALA MVP에서는 한 코스에 최대 6곳까지 선택할 수 있다.
+    selected_places: list[SelectedPlaceRequest] = Field(
+        min_length=1,
+        max_length=6,
+    )
+
+    # 사용자가 현재 사용할 수 있는 전체 시간
     available_time_minutes: int = Field(gt=0)
 
 

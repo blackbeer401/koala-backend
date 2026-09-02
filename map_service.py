@@ -518,7 +518,98 @@ def is_nearby(
     return distance_km <= max_distance_km
 
 
-# 9. 이동수단에 따른 이동시간 계산
+# 9. 자동차 이동시간 계산
+def get_driving(
+    start_x,
+    start_y,
+    end_x,
+    end_y
+):
+    """
+    Kakao Mobility 자동차 길찾기 API를 이용해
+    두 좌표 사이의 자동차 이동시간을 계산한다.
+
+    다른 이동수단과 동일하게 추천 계산에서 사용하는
+    duration_min 필드를 포함한 공통 형식으로 반환한다.
+
+    API 호출 또는 경로 조회에 실패하면 None을 반환한다.
+    """
+
+    url = (
+        "https://apis-navi.kakaomobility.com/"
+        "v1/directions"
+    )
+
+    params = {
+        "origin": f"{start_x},{start_y}",
+        "destination": f"{end_x},{end_y}",
+        "priority": "TIME",
+        "summary": "true",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=kakao_headers(),
+            params=params,
+            timeout=10,
+        )
+
+        response.raise_for_status()
+        data = response.json()
+
+    except (requests.RequestException, ValueError):
+        return None
+
+    routes = data.get("routes", [])
+
+    if not routes:
+        return None
+
+    route = routes[0]
+    result_code = route.get("result_code")
+
+    # 출발지와 목적지가 5m 이내인 경우 이동시간을 0분으로 처리한다.
+    if result_code == 104:
+        return {
+            "mode": "car",
+            "distance_m": 0,
+            "duration_sec": 0,
+            "duration_min": 0,
+            "toll": 0,
+            "taxi_fare": 0,
+        }
+
+    if result_code != 0:
+        return None
+
+    summary = route.get("summary")
+
+    if not summary:
+        return None
+
+    duration_sec = summary.get("duration")
+    distance_m = summary.get("distance")
+
+    if duration_sec is None or distance_m is None:
+        return None
+
+    fare = summary.get("fare") or {}
+
+    return {
+        "mode": "car",
+        "distance_m": distance_m,
+        "duration_sec": duration_sec,
+        "duration_min": max(
+            1,
+            round(duration_sec / 60)
+        ),
+        "toll": fare.get("toll"),
+        "taxi_fare": fare.get("taxi"),
+    }
+
+
+# 10. 이동수단에 따른 이동시간 계산
 def get_travel(
     start_x,
     start_y,
@@ -539,10 +630,13 @@ def get_travel(
     walk:
     - 도보
 
+    car:
+    - 자동차
+
     현재 지원하지 않는 이동수단이 들어오면 None을 반환한다.
     """
 
-    # 9-1. 도보를 직접 선택한 경우
+    # 10-1. 도보를 직접 선택한 경우
     if transport_mode == "walk":
 
         return get_walking(
@@ -552,7 +646,7 @@ def get_travel(
             end_y
         )
 
-    # 9-2. 대중교통을 직접 선택한 경우
+    # 10-2. 대중교통을 직접 선택한 경우
     if transport_mode == "public_transit":
 
         return get_transit(
@@ -562,7 +656,17 @@ def get_travel(
             end_y
         )
 
-    # 9-3. auto인 경우 거리에 따라 이동수단 자동 선택
+    # 10-3. 자동차를 직접 선택한 경우
+    if transport_mode == "car":
+
+        return get_driving(
+            start_x,
+            start_y,
+            end_x,
+            end_y
+        )
+
+    # 10-4. auto인 경우 거리에 따라 이동수단 자동 선택
     if transport_mode == "auto":
 
         # 가까운 거리라면 도보 사용

@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     model_validator,
     Field,
     field_validator,
@@ -270,6 +271,29 @@ class PlaceRecommendMoreRequest(BaseModel):
     offset: int = Field(
         ge=0,
     )
+
+
+class SelectedPlaceRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    category: Literal[
+        "food",
+        "cafe",
+        "walk",
+        "culture",
+        "entertainment",
+        "shopping",
+        "drink",
+    ]
+    specified_duration_minutes: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
+
+class PlaceSelectionValidationRequest(BaseModel):
+    selected_places: list[SelectedPlaceRequest] = Field(min_length=1)
+    available_time_minutes: int = Field(gt=0)
 
 
 # 3. 선택한 지역의 실제 장소 추천 요청

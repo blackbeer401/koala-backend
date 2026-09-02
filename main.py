@@ -17,6 +17,7 @@ from models import (
     StructuredConditions,
     PlaceRecommendRequest,
     PlaceRecommendMoreRequest,
+    PlaceSelectionValidationRequest,
 )
 
 from llm_service import (
@@ -64,6 +65,8 @@ from ranking import (
     calculate_final_score,
     convert_travel_minutes_to_score,
 )
+
+from stay_time_validation import validate_selected_places_stay_time
 
 
 # 1. FastAPI 앱 생성
@@ -948,4 +951,38 @@ def recommend_more_actual_places(
         "cursor": page.cursor,
         "has_more": page.has_more,
         "next_offset": page.next_offset,
+    }
+
+
+@app.post("/recommend/places/validate-selection")
+def validate_place_selection(
+    request: PlaceSelectionValidationRequest,
+):
+    selected_places = [
+        place.model_dump()
+        for place in request.selected_places
+    ]
+    validation_result = validate_selected_places_stay_time(
+        [
+            {
+                "activity": place["category"],
+                "specified_duration_minutes": place.get(
+                    "specified_duration_minutes"
+                ),
+            }
+            for place in selected_places
+        ],
+        request.available_time_minutes,
+    )
+
+    return {
+        "status": validation_result["status"],
+        "selected_places": selected_places,
+        "stay_time_validation": {
+            key: value
+            for key, value in validation_result.items()
+            if key != "status"
+        } | {
+            "available_time_minutes": request.available_time_minutes,
+        },
     }

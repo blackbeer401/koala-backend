@@ -22,10 +22,21 @@ def get_congestion_data(area_code: str):
         f"{SEOUL_API_KEY}/json/citydata_ppltn/1/5/{area_code}"
     )
 
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            url,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-    return response.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    return data
 
 
 
@@ -38,24 +49,31 @@ def get_nearest_forecast_congestion(
     서울시 혼잡도 예측시간의 데이터를 반환한다.
     """
 
-    population_data = congestion_data[
-        "SeoulRtd.citydata_ppltn"
-    ][0]
+    try:
+        population_data = congestion_data[
+            "SeoulRtd.citydata_ppltn"
+        ][0]
 
-    forecasts = population_data["FCST_PPLTN"]
+        forecasts = population_data["FCST_PPLTN"]
 
-    nearest_forecast = min(
-        forecasts,
-        key=lambda forecast: abs(
-            datetime.strptime(
-                forecast["FCST_TIME"],
-                "%Y-%m-%d %H:%M"
-            ).replace(
-                tzinfo=arrival_datetime.tzinfo
+        if not forecasts:
+            return None
+
+        nearest_forecast = min(
+            forecasts,
+            key=lambda forecast: abs(
+                datetime.strptime(
+                    forecast["FCST_TIME"],
+                    "%Y-%m-%d %H:%M"
+                ).replace(
+                    tzinfo=arrival_datetime.tzinfo
+                )
+                - arrival_datetime
             )
-            - arrival_datetime
         )
-    )
+
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
 
     return nearest_forecast
 

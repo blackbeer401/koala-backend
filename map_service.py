@@ -47,68 +47,94 @@ def search_location(query: str):
         "https://dapi.kakao.com/v2/local/search/keyword.json"
     )
 
-    response = requests.get(
-        keyword_url,
-        headers=kakao_headers(),
-        params={
-            "query": query
-        }
-    )
+    try:
+        response = requests.get(
+            keyword_url,
+            headers=kakao_headers(),
+            params={
+                "query": query
+            },
+            timeout=10,
+        )
 
-    data = response.json()
+        response.raise_for_status()
+        data = response.json()
+
+    except (requests.RequestException, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
 
     # 검색 결과가 있으면 첫 번째 장소 사용
     if data.get("documents"):
 
         place = data["documents"][0]
 
-        return {
-            # 실제 Kakao 장소명
-            "name": place.get(
-                "place_name",
-                query
-            ),
+        try:
+            return {
+                # 실제 Kakao 장소명
+                "name": place.get(
+                    "place_name",
+                    query
+                ),
 
-            # 도로명 주소가 있으면 우선 사용하고
-            # 없으면 지번 주소 사용
-            "address": (
-                place.get("road_address_name")
-                or place.get("address_name")
-            ),
+                # 도로명 주소가 있으면 우선 사용하고
+                # 없으면 지번 주소 사용
+                "address": (
+                    place.get("road_address_name")
+                    or place.get("address_name")
+                ),
 
-            # x = 경도(Longitude)
-            "x": float(place["x"]),
+                # x = 경도(Longitude)
+                "x": float(place["x"]),
 
-            # y = 위도(Latitude)
-            "y": float(place["y"])
-        }
+                # y = 위도(Latitude)
+                "y": float(place["y"])
+            }
+
+        except (KeyError, TypeError, ValueError):
+            return None
 
     # 3-2. 키워드 검색 결과가 없으면 주소 검색
     address_url = (
         "https://dapi.kakao.com/v2/local/search/address.json"
     )
 
-    response = requests.get(
-        address_url,
-        headers=kakao_headers(),
-        params={
-            "query": query
-        }
-    )
+    try:
+        response = requests.get(
+            address_url,
+            headers=kakao_headers(),
+            params={
+                "query": query
+            },
+            timeout=10,
+        )
 
-    data = response.json()
+        response.raise_for_status()
+        data = response.json()
+
+    except (requests.RequestException, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
 
     # 주소 검색 결과가 있으면 첫 번째 결과 사용
     if data.get("documents"):
 
         place = data["documents"][0]
 
-        return {
-            "name": query,
-            "address": place.get("address_name"),
-            "x": float(place["x"]),
-            "y": float(place["y"])
-        }
+        try:
+            return {
+                "name": query,
+                "address": place.get("address_name"),
+                "x": float(place["x"]),
+                "y": float(place["y"])
+            }
+
+        except (KeyError, TypeError, ValueError):
+            return None
 
     # 장소명과 주소 모두 검색되지 않은 경우
     return None
@@ -303,104 +329,112 @@ def get_transit(
         "end_y": end_y
     }
 
-    response = requests.get(
-        url,
-        headers=kakao_headers(),
-        params=params
-    )
-
-    data = response.json()
-
-    # 조회 실패 시 Kakao 응답을 그대로 반환
-    if data.get("status") != "OK":
-        print("Kakao transit error:", data)
-        return data
-
-    # 여러 추천 경로 중 현재는 첫 번째 경로 사용
-    route = data["routes"][0]
-
-    # 전체 경로 정보
-    properties = route["properties"]
-
-    # 세부 이동 경로를 저장할 리스트
-    paths = []
-
-    # 전체 경로를 도보 / 버스 / 지하철 구간별로 나눠 저장
-    for step in route["steps"]:
-
-        step_properties = step["properties"]
-
-        # WALKING / BUS / SUBWAY
-        step_type = step_properties["type"]
-
-        # 버스 번호 또는 지하철 노선 정보
-        vehicles = step_properties.get(
-            "vehicles",
-            []
+    try:
+        response = requests.get(
+            url,
+            headers=kakao_headers(),
+            params=params,
+            timeout=10,
         )
 
-        vehicle_name = None
+        response.raise_for_status()
+        data = response.json()
 
-        if vehicles:
-            vehicle_name = vehicles[0].get(
-                "name"
+    except (requests.RequestException, ValueError):
+        return None
+
+    if not isinstance(data, dict) or data.get("status") != "OK":
+        return None
+
+    try:
+        # 여러 추천 경로 중 현재는 첫 번째 경로 사용
+        route = data["routes"][0]
+
+        # 전체 경로 정보
+        properties = route["properties"]
+
+        # 세부 이동 경로를 저장할 리스트
+        paths = []
+
+        # 전체 경로를 도보 / 버스 / 지하철 구간별로 나눠 저장
+        for step in route["steps"]:
+
+            step_properties = step["properties"]
+
+            # WALKING / BUS / SUBWAY
+            step_type = step_properties["type"]
+
+            # 버스 번호 또는 지하철 노선 정보
+            vehicles = step_properties.get(
+                "vehicles",
+                []
             )
 
-        paths.append({
-            # WALKING / BUS / SUBWAY
-            "type": step_type,
+            vehicle_name = None
 
-            # 예: 2호선, 341번 버스
-            "vehicle": vehicle_name,
+            if vehicles:
+                vehicle_name = vehicles[0].get(
+                    "name"
+                )
 
-            # 이동 안내문
-            "guidance":
-                step_properties.get("guidance"),
+            paths.append({
+                # WALKING / BUS / SUBWAY
+                "type": step_type,
 
-            # 해당 구간 거리
-            "distance":
-                step_properties.get("distance"),
+                # 예: 2호선, 341번 버스
+                "vehicle": vehicle_name,
 
-            # 해당 구간 이동시간
-            "time":
-                step_properties.get("time"),
+                # 이동 안내문
+                "guidance":
+                    step_properties.get("guidance"),
 
-            # 지도에 경로를 표시할 때 사용할 좌표
-            "points":
-                step["path"]["points"]
-        })
+                # 해당 구간 거리
+                "distance":
+                    step_properties.get("distance"),
 
-    return {
-        # 이동수단
-        "mode": "transit",
+                # 해당 구간 이동시간
+                "time":
+                    step_properties.get("time"),
 
-        # BUS / SUBWAY / BUS_AND_SUBWAY 등
-        "route_type":
-            properties["type"],
+                # 지도에 경로를 표시할 때 사용할 좌표
+                "points":
+                    step["path"]["points"]
+            })
 
-        # 전체 이동거리(m)
-        "distance_m":
-            properties["totalDistance"],
+        total_time = properties["totalTime"]
 
-        # 전체 이동시간(초)
-        "duration_sec":
-            properties["totalTime"],
+        return {
+            # 이동수단
+            "mode": "transit",
 
-        # 계산 및 화면 표시용 이동시간(분)
-        "duration_min":
-            round(properties["totalTime"] / 60),
+            # BUS / SUBWAY / BUS_AND_SUBWAY 등
+            "route_type":
+                properties["type"],
 
-        # 총 환승 횟수
-        "transfers":
-            properties["transfers"],
+            # 전체 이동거리(m)
+            "distance_m":
+                properties["totalDistance"],
 
-        # 총 교통요금
-        "fare":
-            properties.get("fare", {}).get("value"),
+            # 전체 이동시간(초)
+            "duration_sec": total_time,
 
-        # 도보 / 버스 / 지하철 세부 경로
-        "paths": paths
-    }
+            # 계산 및 화면 표시용 이동시간(분)
+            "duration_min": round(total_time / 60),
+
+            # 총 환승 횟수
+            "transfers":
+                properties["transfers"],
+
+            # 총 교통요금
+            "fare":
+                properties.get("fare", {}).get("value"),
+
+            # 도보 / 버스 / 지하철 세부 경로
+            "paths": paths
+        }
+
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
 
 
 # 7. 도보 이동시간 계산

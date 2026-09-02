@@ -296,6 +296,29 @@ class PlaceSelectionValidationRequest(BaseModel):
     available_time_minutes: int = Field(gt=0)
 
 
+class CourseLocationRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class CoursePlaceRequest(SelectedPlaceRequest):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class CourseCalculationRequest(BaseModel):
+    start_location: CourseLocationRequest
+    selected_places: list[CoursePlaceRequest] = Field(min_length=1)
+    available_time_minutes: int = Field(gt=0)
+    end_location: CourseLocationRequest | None = None
+    transport_mode: Literal[
+        "auto",
+        "public_transit",
+        "walk",
+        "car",
+    ] = "auto"
+
+
 # 3. 선택한 지역의 실제 장소 추천 요청
 class PlaceRecommendRequest(BaseModel):
     """

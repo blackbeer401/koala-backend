@@ -18,6 +18,7 @@ from models import (
     PlaceRecommendRequest,
     PlaceRecommendMoreRequest,
     PlaceSelectionValidationRequest,
+    CourseCalculationRequest,
 )
 
 from llm_service import (
@@ -67,6 +68,7 @@ from ranking import (
 )
 
 from stay_time_validation import validate_selected_places_stay_time
+from course_order_optimizer import optimize_course_order
 
 
 # 1. FastAPI 앱 생성
@@ -986,3 +988,39 @@ def validate_place_selection(
             "available_time_minutes": request.available_time_minutes,
         },
     }
+
+
+@app.post("/recommend/course")
+def calculate_course(
+    request: CourseCalculationRequest,
+):
+    selected_places = []
+    for place in request.selected_places:
+        place_data = place.model_dump()
+        place_data["activity"] = place_data["category"]
+        selected_places.append(place_data)
+
+    try:
+        return optimize_course_order(
+            start_location=request.start_location.model_dump(),
+            selected_places=selected_places,
+            available_time_minutes=request.available_time_minutes,
+            end_location=(
+                request.end_location.model_dump()
+                if request.end_location is not None
+                else None
+            ),
+            transport_mode=request.transport_mode,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error),
+        ) from error

@@ -292,7 +292,7 @@ class SelectedPlaceRequest(BaseModel):
 
 
 class PlaceSelectionValidationRequest(BaseModel):
-    selected_places: list[SelectedPlaceRequest] = Field(min_length=1)
+    selected_places: list[SelectedPlaceRequest] = Field(min_length=1, max_length=6)
     available_time_minutes: int = Field(gt=0)
 
 

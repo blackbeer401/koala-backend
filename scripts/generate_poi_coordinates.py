@@ -1,7 +1,18 @@
+"""서울시 주요 POI Shapefile에서 중심좌표 CSV를 생성한다."""
+
+from pathlib import Path
+
 import geopandas as gpd
 
 
-file_path = "data/poi121_polygon/서울시 주요 121장소 영역.shp"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+file_path = (
+    PROJECT_ROOT
+    / "data"
+    / "poi121_polygon"
+    / "서울시 주요 121장소 영역.shp"
+)
 
 gdf = gpd.read_file(file_path)
 
@@ -36,7 +47,7 @@ poi_coordinates = gdf[
 ]
 
 poi_coordinates.to_csv(
-    "data/poi121_coordinates.csv",
+    PROJECT_ROOT / "data" / "poi121_coordinates.csv",
     index=False,
     encoding="utf-8-sig"
 )

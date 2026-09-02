@@ -1,15 +1,22 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from datetime import datetime
 
 from time import perf_counter
 
 from place_recommendation_service import recommend_places
+from place_recommendation_cache import (
+    PlaceCursorExpiredError,
+    PlaceCursorNotFoundError,
+    create_place_recommendation_page,
+    get_next_place_recommendation_page,
+)
 
 from models import (
     RecommendRequest,
     StructuredConditions,
     PlaceRecommendRequest,
+    PlaceRecommendMoreRequest,
 )
 
 from llm_service import (
@@ -886,7 +893,7 @@ def recommend_actual_places(
     실제 방문 장소를 추천한다.
     """
 
-    places = recommend_places(
+    ranked_places = recommend_places(
         area_name=request.area_name,
         latitude=request.latitude,
         longitude=request.longitude,
@@ -897,7 +904,48 @@ def recommend_actual_places(
         space_preference=request.space_preference,
     )
 
+    page = create_place_recommendation_page(
+        area_name=request.area_name,
+        places=ranked_places,
+    )
+
     return {
-        "area_name": request.area_name,
-        "places": places,
+        "area_name": page.area_name,
+        "places": page.places,
+        "cursor": page.cursor,
+        "has_more": page.has_more,
+        "next_offset": page.next_offset,
+    }
+
+
+@app.post("/recommend/places/more")
+def recommend_more_actual_places(
+    request: PlaceRecommendMoreRequest
+):
+    """기존 candidate pool에서 다음 실제 장소를 반환한다."""
+
+    try:
+        page = get_next_place_recommendation_page(
+            request.cursor,
+            request.offset,
+        )
+
+    except PlaceCursorExpiredError as error:
+        raise HTTPException(
+            status_code=410,
+            detail="장소 추천 cursor가 만료되었습니다.",
+        ) from error
+
+    except PlaceCursorNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="유효하지 않은 장소 추천 cursor입니다.",
+        ) from error
+
+    return {
+        "area_name": page.area_name,
+        "places": page.places,
+        "cursor": page.cursor,
+        "has_more": page.has_more,
+        "next_offset": page.next_offset,
     }

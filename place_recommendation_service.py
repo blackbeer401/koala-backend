@@ -30,6 +30,15 @@ TOUR_ACTIVITY_CATEGORY_MAP = {
     "레저스포츠": "entertainment",
 }
 
+# 실제 provider mapping으로 후보를 확보할 수 있는 activity 순서
+SUPPORTED_PLACE_ACTIVITIES = [
+    "food",
+    "cafe",
+    "culture",
+    "entertainment",
+    "shopping",
+]
+
 def normalize_place_name(name: str | None):
     """
     장소 중복 비교를 위해 장소명의 표기 차이를 정리한다.
@@ -227,6 +236,93 @@ def normalize_tour_places(
     return normalized_places
 
 
+def resolve_place_activities(
+    activities: list[str],
+):
+    """
+    실제 provider mapping이 있는 activity만 중복 없이 반환한다.
+
+    사용자가 activity를 지정하지 않으면 현재 provider가 지원하는
+    전체 activity를 열어둔다.
+    """
+
+    requested_activities = (
+        activities
+        if activities
+        else SUPPORTED_PLACE_ACTIVITIES
+    )
+
+    return list(dict.fromkeys(
+        activity
+        for activity in requested_activities
+        if activity in SUPPORTED_PLACE_ACTIVITIES
+    ))
+
+
+def order_places_by_activity_round_robin(
+    places: list[dict],
+    activity_order: list[str],
+):
+    """
+    activity 내부에서는 거리순을 유지하고 activity 사이에서는
+    후보가 소진될 때까지 round-robin 순서로 장소를 배치한다.
+    """
+
+    places_by_activity = {
+        activity: []
+        for activity in activity_order
+    }
+
+    for place in places:
+        category = place.get("category")
+
+        if category in places_by_activity:
+            places_by_activity[category].append(place)
+
+    for activity, activity_places in places_by_activity.items():
+        places_by_activity[activity] = sort_places_by_score(
+            activity_places
+        )
+
+    ordered_places = []
+
+    while any(places_by_activity.values()):
+        for activity in activity_order:
+            activity_places = places_by_activity[activity]
+
+            if activity_places:
+                ordered_places.append(
+                    activity_places.pop(0)
+                )
+
+    return ordered_places
+
+
+def finalize_recommended_places(
+    places: list[dict],
+    activity_order: list[str],
+):
+    """
+    수집이 끝난 장소 후보에 공통 후처리를 적용한다.
+
+    정상 경로와 fallback 경로 모두 중복 제거, 점수 계산,
+    activity 내부 정렬과 round-robin을 동일하게 적용한다.
+    """
+
+    unique_places = remove_duplicate_places(
+        places
+    )
+
+    scored_places = add_place_ranking_scores(
+        unique_places
+    )
+
+    return order_places_by_activity_round_robin(
+        scored_places,
+        activity_order,
+    )
+
+
 def recommend_places(
     area_name: str,
     latitude: float,
@@ -254,23 +350,14 @@ def recommend_places(
     → 최종 장소 반환
     """
 
-    # 사용자 활동 중 Kakao 카테고리 검색이 가능한 활동을 확인한다.
-    kakao_category_codes = []
-
-    for activity in activities:
-        category_code = KAKAO_ACTIVITY_CATEGORY_CODES.get(
-            activity
-        )
-
-        if category_code is not None:
-            kakao_category_codes.append(
-                category_code
-            )
+    active_activities = resolve_place_activities(
+        activities
+    )
 
     # Kakao에서 검색 가능한 활동의 실제 장소 후보를 조회한다.
     normalized_kakao_places = []
 
-    for activity in activities:
+    for activity in active_activities:
         category_code = KAKAO_ACTIVITY_CATEGORY_CODES.get(
             activity
         )
@@ -310,23 +397,17 @@ def recommend_places(
         # Kakao 행정구역 조회에 실패하더라도
         # 이미 조회된 Kakao 장소 후보가 있다면
         # 해당 후보만으로 랭킹을 계산해서 반환한다.
-        scored_places = add_place_ranking_scores(
-            normalized_kakao_places
-        )
-
-        return sort_places_by_score(
-            scored_places
+        return finalize_recommended_places(
+            normalized_kakao_places,
+            active_activities,
         )
 
     # 행정구역을 찾지 못하더라도
     # 이미 조회된 Kakao 장소 후보는 반환한다.
     if region is None:
-        scored_places = add_place_ranking_scores(
-            normalized_kakao_places
-        )
-
-        return sort_places_by_score(
-            scored_places
+        return finalize_recommended_places(
+            normalized_kakao_places,
+            active_activities,
         )
 
     # 2. 행정구 이름을 TourAPI의 시군구 코드로 변환한다.
@@ -339,12 +420,9 @@ def recommend_places(
     # TourAPI에서 지원하는 시군구 코드가 없더라도
     # 이미 조회된 Kakao 장소 후보는 반환한다.
     if tour_sigungu_code is None:
-        scored_places = add_place_ranking_scores(
-            normalized_kakao_places
-        )
-
-        return sort_places_by_score(
-            scored_places
+        return finalize_recommended_places(
+            normalized_kakao_places,
+            active_activities,
         )
 
     # 3. 확인된 자치구를 기준으로 TourAPI에서
@@ -358,23 +436,17 @@ def recommend_places(
         )
 
     except Exception:
-        scored_places = add_place_ranking_scores(
-            normalized_kakao_places
-        )
-
-        return sort_places_by_score(
-            scored_places
+        return finalize_recommended_places(
+            normalized_kakao_places,
+            active_activities,
         )
 
     # TourAPI 장소 후보가 없더라도
     # 이미 조회된 Kakao 장소 후보는 반환한다.
     if not places:
-        scored_places = add_place_ranking_scores(
-            normalized_kakao_places
-        )
-
-        return sort_places_by_score(
-            scored_places
+        return finalize_recommended_places(
+            normalized_kakao_places,
+            active_activities,
         )
     
     # 4. 각 장소와 추천 지역 중심 좌표 사이의
@@ -401,7 +473,7 @@ def recommend_places(
     filtered_tour_places = [
         place
         for place in normalized_tour_places
-        if place["category"] in activities
+        if place["category"] in active_activities
     ]
 
     # 8. Kakao와 TourAPI 후보를 합친 뒤
@@ -411,18 +483,10 @@ def recommend_places(
         + filtered_tour_places
     )
 
-    unique_places = remove_duplicate_places(
-        combined_places
+    # 9. 정상 경로와 fallback 경로가 같은 정책을 사용하도록
+    # 공통 후처리에서 중복 제거, 점수 계산, activity별 정렬,
+    # round-robin 순서를 적용한다.
+    return finalize_recommended_places(
+        combined_places,
+        active_activities,
     )
-
-    # 9. 장소 후보에 랭킹 점수를 추가한다.
-    scored_places = add_place_ranking_scores(
-        unique_places
-    )
-
-    # 10. 최종 장소 점수가 높은 순서대로 정렬한다.
-    ranked_places = sort_places_by_score(
-        scored_places
-    )
-
-    return ranked_places[:5]

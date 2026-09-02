@@ -219,6 +219,19 @@ class StructuredConditions(BaseModel):
         "any",
     ] | None = None
 
+
+class PlaceRecommendMoreRequest(BaseModel):
+    """기존 실제 장소 추천의 다음 후보 페이지 요청."""
+
+    cursor: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    offset: int = Field(
+        ge=0,
+    )
+
     @model_validator(mode="after")
     def set_legacy_desired_duration(self):
 

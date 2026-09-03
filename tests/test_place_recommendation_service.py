@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from place_ranking import calculate_distance_score
+from seoul_culture_service import SeoulCultureAPIError
 from place_recommendation_cache import (
     PLACE_PAGE_SIZE,
     PlaceCursorExpiredError,
@@ -254,10 +255,15 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
         "place_recommendation_service.get_region_from_coordinates",
         return_value=None,
     )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
     @patch("place_recommendation_service.search_places_by_category")
     def test_empty_activities_collect_all_supported_kakao_categories(
         self,
         mock_search_places,
+        mock_get_exhibitions,
         mock_get_region,
     ):
         category_prefixes = {
@@ -290,6 +296,155 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
             ["food", "cafe", "culture", "food", "cafe", "culture"],
         )
         mock_get_region.assert_called_once()
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions"
+    )
+    @patch("place_recommendation_service.search_places_by_category")
+    def test_culture_places_join_multi_activity_round_robin(
+        self,
+        mock_search_places,
+        mock_get_exhibitions,
+        mock_get_region,
+    ):
+        mock_search_places.side_effect = lambda **kwargs: (
+            make_kakao_places(2, prefix="음식")
+            if kwargs["category_code"] == "FD6"
+            else []
+        )
+        mock_get_exhibitions.return_value = [
+            make_place("전시 1", "culture", 100),
+            make_place("전시 2", "culture", 200),
+        ]
+
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food", "culture"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            [place["category"] for place in ranked_places],
+            ["food", "culture", "food", "culture"],
+        )
+        mock_get_exhibitions.assert_called_once_with(
+            latitude=37.5,
+            longitude=126.9,
+            max_distance_m=2000,
+        )
+
+    @patch("place_recommendation_service.get_hub_places")
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value={"sigungu_name": "마포구"},
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        side_effect=SeoulCultureAPIError("장애"),
+    )
+    @patch("place_recommendation_service.search_places_by_category")
+    def test_culture_api_failure_keeps_kakao_and_tour_results(
+        self,
+        mock_search_places,
+        mock_get_exhibitions,
+        mock_get_region,
+        mock_get_hub_places,
+    ):
+        mock_search_places.return_value = make_kakao_places(1, prefix="문화")
+        mock_get_hub_places.return_value = [{
+            "mapX": "126.9",
+            "mapY": "37.5",
+            "hubTatsNm": "Tour 문화",
+            "hubCtgryMclsNm": "문화관광",
+            "hubRank": "1",
+        }]
+
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["culture"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            {place["source"] for place in ranked_places},
+            {"kakao", "tour"},
+        )
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        side_effect=RuntimeError("지역 API 장애"),
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[make_place("현재 전시", "culture", 100)],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_tour_fallback_keeps_culture_results(
+        self,
+        mock_search_places,
+        mock_get_exhibitions,
+        mock_get_region,
+    ):
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["culture"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            [place["name"] for place in ranked_places],
+            ["현재 전시"],
+        )
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch("place_recommendation_service.get_nearby_current_exhibitions")
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_non_culture_does_not_call_culture_api(
+        self,
+        mock_search_places,
+        mock_get_exhibitions,
+        mock_get_region,
+    ):
+        recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["cafe"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        mock_get_exhibitions.assert_not_called()
 
     @patch(
         "place_recommendation_service.get_region_from_coordinates",

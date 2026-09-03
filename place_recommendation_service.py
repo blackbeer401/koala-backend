@@ -14,6 +14,10 @@ from place_ranking import (
     add_place_ranking_scores,
     sort_places_by_score,
 )
+from seoul_culture_service import (
+    SeoulCultureAPIError,
+    get_nearby_current_exhibitions,
+)
 
 # 우리 서비스 활동 카테고리 → Kakao 장소 카테고리 코드
 KAKAO_ACTIVITY_CATEGORY_CODES = {
@@ -386,6 +390,25 @@ def recommend_places(
             )
         )
 
+    normalized_seoul_culture_places = []
+
+    if "culture" in active_activities:
+        try:
+            normalized_seoul_culture_places = (
+                get_nearby_current_exhibitions(
+                    latitude=latitude,
+                    longitude=longitude,
+                    max_distance_m=2000,
+                )
+            )
+        except SeoulCultureAPIError:
+            normalized_seoul_culture_places = []
+
+    base_places = (
+        normalized_kakao_places
+        + normalized_seoul_culture_places
+    )
+
     # 1. 추천 지역의 좌표를 기준으로 행정구역을 확인한다.
     try:
         region = get_region_from_coordinates(
@@ -395,18 +418,18 @@ def recommend_places(
 
     except Exception:
         # Kakao 행정구역 조회에 실패하더라도
-        # 이미 조회된 Kakao 장소 후보가 있다면
+        # 이미 조회된 기본 장소 후보가 있다면
         # 해당 후보만으로 랭킹을 계산해서 반환한다.
         return finalize_recommended_places(
-            normalized_kakao_places,
+            base_places,
             active_activities,
         )
 
     # 행정구역을 찾지 못하더라도
-    # 이미 조회된 Kakao 장소 후보는 반환한다.
+    # 이미 조회된 기본 장소 후보는 반환한다.
     if region is None:
         return finalize_recommended_places(
-            normalized_kakao_places,
+            base_places,
             active_activities,
         )
 
@@ -418,17 +441,17 @@ def recommend_places(
     )
 
     # TourAPI에서 지원하는 시군구 코드가 없더라도
-    # 이미 조회된 Kakao 장소 후보는 반환한다.
+    # 이미 조회된 기본 장소 후보는 반환한다.
     if tour_sigungu_code is None:
         return finalize_recommended_places(
-            normalized_kakao_places,
+            base_places,
             active_activities,
         )
 
     # 3. 확인된 자치구를 기준으로 TourAPI에서
     # 실제 장소 후보를 조회한다.
     # TourAPI 호출에 실패하더라도
-    # 이미 조회된 Kakao 장소 후보는 유지한다.
+    # 이미 조회된 기본 장소 후보는 유지한다.
     try:
         places = get_hub_places(
             gu_code=tour_sigungu_code,
@@ -437,15 +460,15 @@ def recommend_places(
 
     except Exception:
         return finalize_recommended_places(
-            normalized_kakao_places,
+            base_places,
             active_activities,
         )
 
     # TourAPI 장소 후보가 없더라도
-    # 이미 조회된 Kakao 장소 후보는 반환한다.
+    # 이미 조회된 기본 장소 후보는 반환한다.
     if not places:
         return finalize_recommended_places(
-            normalized_kakao_places,
+            base_places,
             active_activities,
         )
     
@@ -481,6 +504,7 @@ def recommend_places(
     combined_places = (
         normalized_kakao_places
         + filtered_tour_places
+        + normalized_seoul_culture_places
     )
 
     # 9. 정상 경로와 fallback 경로가 같은 정책을 사용하도록

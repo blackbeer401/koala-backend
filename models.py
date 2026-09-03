@@ -93,7 +93,7 @@ class StructuredConditions(BaseModel):
     # → end_location_text = "강남"
     target_location_text: str | None = None
 
-        # target_location_text가 넓은 지역인지
+    # target_location_text가 넓은 지역인지
     # 특정 장소인지 구분
     #
     # area:
@@ -341,13 +341,15 @@ class CourseLocationRequest(BaseModel):
 
 
 class CoursePlaceRequest(SelectedPlaceRequest):
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
+    pass
 
 
 class CourseCalculationRequest(BaseModel):
     start_location: CourseLocationRequest
-    selected_places: list[CoursePlaceRequest] = Field(min_length=1)
+    selected_places: list[CoursePlaceRequest] = Field(
+        min_length=1,
+        max_length=6,
+    )
     available_time_minutes: int = Field(gt=0)
     end_location: CourseLocationRequest | None = None
     transport_mode: Literal[
@@ -358,7 +360,7 @@ class CourseCalculationRequest(BaseModel):
     ] = "auto"
 
 
-# 3. 선택한 지역의 실제 장소 추천 요청
+# 선택한 지역의 실제 장소 추천 요청
 class PlaceRecommendRequest(BaseModel):
     """
     지역 추천 이후,

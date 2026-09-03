@@ -95,14 +95,61 @@ class CourseOrderOptimizerTest(unittest.TestCase):
             mock_get_travel.call_count,
         )
 
+    @patch("route_travel_time.get_travel")
+    def test_skips_failed_order_and_reuses_failed_directed_leg(
+        self,
+        mock_get_travel,
+    ):
+        def travel_with_failed_a_to_b(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            transport_mode="auto",
+        ):
+            if (start_x, end_x) == (1.0, 2.0):
+                return None
+            return {"duration_min": abs(end_x - start_x) * 10}
+
+        mock_get_travel.side_effect = travel_with_failed_a_to_b
+        places = [
+            location("A", 1.0),
+            location("B", 2.0),
+            location("C", 3.0),
+        ]
+
+        result = optimize_course_order(
+            location("start", 0.0),
+            places,
+            available_time_minutes=200,
+        )
+
+        self.assertEqual(
+            [place["name"] for place in result["optimized_places"]],
+            ["A", "C", "B"],
+        )
+        self.assertCountEqual(result["optimized_places"], places)
+        failed_leg_calls = [
+            mock_call
+            for mock_call in mock_get_travel.call_args_list
+            if mock_call.args[:4] == (1.0, 37.0, 2.0, 37.0)
+        ]
+        self.assertEqual(len(failed_leg_calls), 1)
+
     @patch("route_travel_time.get_travel", return_value=None)
-    def test_propagates_travel_api_failure(self, mock_get_travel):
-        with self.assertRaisesRegex(RuntimeError, "leg_index=0"):
+    def test_fails_only_when_all_complete_orders_fail(self, mock_get_travel):
+        with self.assertRaisesRegex(RuntimeError, "모든 방문 순서"):
             optimize_course_order(
                 location("start", 0.0),
-                [location("A", 1.0), location("B", 2.0)],
+                [
+                    location("A", 1.0),
+                    location("B", 2.0),
+                    location("C", 3.0),
+                ],
                 available_time_minutes=200,
             )
+
+        self.assertEqual(mock_get_travel.call_count, 3)
 
     def test_rejects_more_than_six_places(self):
         with self.assertRaisesRegex(ValueError, "최대 6개"):

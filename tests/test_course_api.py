@@ -48,15 +48,31 @@ def course_result(status="FEASIBLE"):
 class CourseApiTest(unittest.TestCase):
     @patch("main.optimize_course_order")
     def test_single_place_without_end_location(self, mock_optimize):
-        mock_optimize.return_value = course_result()
+        mocked_result = course_result()
+        mocked_result["optimized_places"] = [
+            {
+                "name": "A",
+                "category": "cafe",
+                "activity": "cafe",
+                "latitude": 37.0,
+                "longitude": 127.1,
+            }
+        ]
+        mock_optimize.return_value = mocked_result
 
         result = calculate_course(course_request([place("A", 127.1)]))
 
         self.assertEqual(result["status"], "FEASIBLE")
+
+        # optimizer 내부에는 체류시간 계산용 activity가 전달된다.
         kwargs = mock_optimize.call_args.kwargs
         self.assertEqual(len(kwargs["selected_places"]), 1)
         self.assertEqual(kwargs["selected_places"][0]["activity"], "cafe")
         self.assertIsNone(kwargs["end_location"])
+
+        # 최종 API 응답에서는 내부 계산용 activity를 제거한다.
+        self.assertNotIn("activity", result["optimized_places"][0])
+        self.assertEqual(result["optimized_places"][0]["category"], "cafe")
 
     @patch("main.optimize_course_order")
     def test_multiple_places_with_fixed_end_location(self, mock_optimize):
@@ -89,16 +105,11 @@ class CourseApiTest(unittest.TestCase):
         self.assertEqual(result["status"], "INFEASIBLE")
         self.assertEqual(result["remaining_time_minutes"], -10)
 
-    def test_rejects_more_than_six_places_as_bad_request(self):
-        request = course_request(
-            [place(str(index), 127.0 + index / 100) for index in range(7)]
-        )
-
-        with self.assertRaises(HTTPException) as context:
-            calculate_course(request)
-
-        self.assertEqual(context.exception.status_code, 400)
-        self.assertIn("최대 6개", context.exception.detail)
+    def test_rejects_more_than_six_places_in_request_model(self):
+        with self.assertRaises(ValidationError):
+            course_request(
+                [place(str(index), 127.0 + index / 100) for index in range(7)]
+            )
 
     @patch("main.optimize_course_order", side_effect=RuntimeError("이동시간 실패"))
     def test_returns_bad_gateway_when_travel_calculation_fails(

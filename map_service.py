@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
+ACTUAL_ROUTE_WALK_THRESHOLD_KM = 1.5
 
 
 # 2. Kakao API 요청에 사용할 인증 헤더 생성
@@ -512,7 +513,7 @@ def is_nearby(
     start_y,
     end_x,
     end_y,
-    max_distance_km=1.5
+    max_distance_km=ACTUAL_ROUTE_WALK_THRESHOLD_KM
 ):
     """
     두 좌표의 직선거리를 계산하여

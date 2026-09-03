@@ -28,14 +28,18 @@ def optimize_course_order(
     best_result = None
 
     for order in orders:
-        result = evaluate_course_time(
-            start_location,
-            list(order),
-            available_time_minutes,
-            end_location,
-            transport_mode,
-            travel_cache,
-        )
+        try:
+            result = evaluate_course_time(
+                start_location,
+                list(order),
+                available_time_minutes,
+                end_location,
+                transport_mode,
+                travel_cache,
+            )
+        except RuntimeError:
+            continue
+
         if (
             best_result is None
             or result["total_travel_time_minutes"]
@@ -43,6 +47,11 @@ def optimize_course_order(
         ):
             best_order = list(order)
             best_result = result
+
+    if best_result is None:
+        raise RuntimeError(
+            "모든 방문 순서의 이동시간을 계산할 수 없습니다."
+        )
 
     return {
         "optimized_places": best_order,

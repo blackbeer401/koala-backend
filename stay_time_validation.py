@@ -10,6 +10,7 @@ from candidate_filter import calculate_straight_distance_km
 IMPOSSIBLE_BY_STAY_TIME = "IMPOSSIBLE_BY_STAY_TIME"
 TIGHT_BY_STAY_TIME = "TIGHT_BY_STAY_TIME"
 PENDING_TRAVEL_TIME_VALIDATION = "PENDING_TRAVEL_TIME_VALIDATION"
+SELECTION_WALK_THRESHOLD_KM = 1.0
 
 
 def validate_selected_places_stay_time(
@@ -94,15 +95,19 @@ def estimate_travel_minutes_by_distance(
     선택 단계에서 직선거리를 기준으로
     대략적인 이동시간을 계산한다.
 
-    - 1.5km 이하: 도보 이동으로 추정
-    - 1.5km 초과: 대중교통 이동으로 추정
+    - 1.0km 이하: 도보 이동으로 추정
+    - 1.0km 초과: 대중교통 이동으로 추정
+
+    대중교통 예상시간은
+    서울 대중교통 O/D 표본을 참고한
+    MVP 거리 구간별 값을 사용한다.
 
     외부 이동 API는 호출하지 않는다.
     최종 이동시간은 /recommend/course에서 다시 계산한다.
     """
 
-    # 가까운 거리는 도보로 이동한다고 가정한다.
-    if distance_km <= 1.5:
+    # 1km 이하는 도보로 이동한다고 가정한다.
+    if distance_km <= SELECTION_WALK_THRESHOLD_KM:
         walking_distance_km = distance_km * 1.2
 
         walking_minutes = (
@@ -111,12 +116,11 @@ def estimate_travel_minutes_by_distance(
 
         return round(walking_minutes)
 
-    # 먼 거리는 서울 대중교통 O/D 표본을 참고한
+    # 1km 초과는 서울 대중교통 O/D 표본을 참고한
     # MVP 거리 구간별 예상시간을 사용한다.
     return estimate_transit_minutes_by_distance(
         distance_km
     )
-
 
 def calculate_estimated_route_travel_minutes(
     start_latitude: float,

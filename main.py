@@ -535,10 +535,10 @@ def recommend(request: RecommendRequest):
         }
         for candidate in real_candidates
     }
-    activity_test_results = []
+    scored_candidates = []
 
     for _, row in selected_activity_scores.iterrows():
-        activity_test_results.append({
+        scored_candidates.append({
             "AREA_CD": row["AREA_CD"],
             "AREA_NM": row["AREA_NM"],
             "latitude": candidate_location_map[row["AREA_CD"]]["latitude"],
@@ -556,7 +556,7 @@ def recommend(request: RecommendRequest):
         })
 
     # 사용자가 선택한 활동들의 점수만 평균낸다.
-    for candidate in activity_test_results:
+    for candidate in scored_candidates:
 
         selected_scores = []
 
@@ -577,7 +577,7 @@ def recommend(request: RecommendRequest):
 
     # 시작 위치와 가까운 순서대로 정렬한다.
     distance_ranked_candidates = sorted(
-        activity_test_results,
+        scored_candidates,
         key=lambda candidate: candidate["start_to_candidate_km"]
     )
 
@@ -588,7 +588,7 @@ def recommend(request: RecommendRequest):
 
         # 활동 적합도가 높은 순서대로 정렬한다.
         activity_ranked_candidates = sorted(
-            activity_test_results,
+            scored_candidates,
             key=lambda candidate: candidate["activity_match_score"],
             reverse=True
         )
@@ -1046,7 +1046,7 @@ def calculate_course(
         selected_places.append(place_data)
 
     try:
-        return optimize_course_order(
+        course_result = optimize_course_order(
             start_location=request.start_location.model_dump(),
             selected_places=selected_places,
             available_time_minutes=request.available_time_minutes,
@@ -1057,6 +1057,17 @@ def calculate_course(
             ),
             transport_mode=request.transport_mode,
         )
+
+        cleaned_optimized_places = []
+
+        for place in course_result["optimized_places"]:
+            cleaned_place = place.copy()
+            cleaned_place.pop("activity", None)
+            cleaned_optimized_places.append(cleaned_place)
+
+        course_result["optimized_places"] = cleaned_optimized_places
+
+        return course_result
 
     except ValueError as error:
         raise HTTPException(

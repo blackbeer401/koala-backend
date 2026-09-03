@@ -107,7 +107,10 @@ class StructuredConditions(BaseModel):
     #
     # target_location_text가 None이면
     # target_location_scope도 None
-    target_location_scope: str | None = None
+    target_location_scope: Literal[
+        "area",
+        "place",
+    ] | None = None
 
     # 다음 일정 위치
     # 예: "7시에 잠실 가야 해" → "잠실"

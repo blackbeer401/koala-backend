@@ -11,7 +11,7 @@ class LlmServiceTest(unittest.TestCase):
         intent = {
             "start_location_text": "사당",
             "target_location_text": "잠실",
-            "target_location_scope": "specific",
+            "target_location_scope": "place",
             "end_location_text": None,
             "start_time": None,
             "end_time": "19:00",

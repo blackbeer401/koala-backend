@@ -1063,6 +1063,7 @@ def calculate_course(
         for place in course_result["optimized_places"]:
             cleaned_place = place.copy()
             cleaned_place.pop("activity", None)
+            cleaned_place.pop("preferred_first", None)
             cleaned_optimized_places.append(cleaned_place)
 
         course_result["optimized_places"] = cleaned_optimized_places

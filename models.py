@@ -344,7 +344,7 @@ class CourseLocationRequest(BaseModel):
 
 
 class CoursePlaceRequest(SelectedPlaceRequest):
-    pass
+    preferred_first: bool = False
 
 
 class CourseCalculationRequest(BaseModel):
@@ -361,6 +361,15 @@ class CourseCalculationRequest(BaseModel):
         "walk",
         "car",
     ] = "auto"
+
+    @model_validator(mode="after")
+    def validate_preferred_first_count(self):
+        if sum(place.preferred_first for place in self.selected_places) > 1:
+            raise ValueError(
+                "preferred_first=True인 장소는 최대 1개만 허용됩니다."
+            )
+
+        return self
 
 
 # 선택한 지역의 실제 장소 추천 요청

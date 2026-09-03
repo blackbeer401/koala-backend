@@ -23,12 +23,13 @@ def course_request(
     )
 
 
-def place(name, longitude):
+def place(name, longitude, preferred_first=False):
     return {
         "name": name,
         "category": "cafe",
         "latitude": 37.0,
         "longitude": longitude,
+        "preferred_first": preferred_first,
     }
 
 
@@ -56,11 +57,14 @@ class CourseApiTest(unittest.TestCase):
                 "activity": "cafe",
                 "latitude": 37.0,
                 "longitude": 127.1,
+                "preferred_first": True,
             }
         ]
         mock_optimize.return_value = mocked_result
 
-        result = calculate_course(course_request([place("A", 127.1)]))
+        result = calculate_course(
+            course_request([place("A", 127.1, preferred_first=True)])
+        )
 
         self.assertEqual(result["status"], "FEASIBLE")
 
@@ -68,10 +72,12 @@ class CourseApiTest(unittest.TestCase):
         kwargs = mock_optimize.call_args.kwargs
         self.assertEqual(len(kwargs["selected_places"]), 1)
         self.assertEqual(kwargs["selected_places"][0]["activity"], "cafe")
+        self.assertTrue(kwargs["selected_places"][0]["preferred_first"])
         self.assertIsNone(kwargs["end_location"])
 
         # 최종 API 응답에서는 내부 계산용 activity를 제거한다.
         self.assertNotIn("activity", result["optimized_places"][0])
+        self.assertNotIn("preferred_first", result["optimized_places"][0])
         self.assertEqual(result["optimized_places"][0]["category"], "cafe")
 
     @patch("main.optimize_course_order")
@@ -110,6 +116,13 @@ class CourseApiTest(unittest.TestCase):
             course_request(
                 [place(str(index), 127.0 + index / 100) for index in range(7)]
             )
+
+    def test_rejects_multiple_preferred_first_places(self):
+        with self.assertRaisesRegex(ValidationError, "최대 1개"):
+            course_request([
+                place("A", 127.1, preferred_first=True),
+                place("B", 127.2, preferred_first=True),
+            ])
 
     @patch("main.optimize_course_order", side_effect=RuntimeError("이동시간 실패"))
     def test_returns_bad_gateway_when_travel_calculation_fails(

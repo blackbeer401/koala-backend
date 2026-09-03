@@ -18,11 +18,33 @@ def optimize_course_order(
             f"방문 순서 최적화는 최대 {MAX_OPTIMIZATION_PLACES}개 장소까지 지원합니다."
         )
 
-    orders = (
-        [tuple(selected_places)]
-        if len(selected_places) <= 1
-        else permutations(selected_places)
-    )
+    preferred_places = [
+        place
+        for place in selected_places
+        if place.get("preferred_first", False)
+    ]
+    if len(preferred_places) > 1:
+        raise ValueError(
+            "preferred_first=True인 장소는 최대 1개만 허용됩니다."
+        )
+
+    if preferred_places:
+        preferred_place = preferred_places[0]
+        remaining_places = [
+            place
+            for place in selected_places
+            if place is not preferred_place
+        ]
+        orders = (
+            (preferred_place, *remaining_order)
+            for remaining_order in permutations(remaining_places)
+        )
+    else:
+        orders = (
+            [tuple(selected_places)]
+            if len(selected_places) <= 1
+            else permutations(selected_places)
+        )
     travel_cache = {}
     best_order = None
     best_result = None

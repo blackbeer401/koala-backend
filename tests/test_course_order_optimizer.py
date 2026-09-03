@@ -62,6 +62,88 @@ class CourseOrderOptimizerTest(unittest.TestCase):
         self.assertEqual(result["legs"][-1]["destination"]["longitude"], 3.0)
 
     @patch("route_travel_time.get_travel", side_effect=distance_based_travel)
+    def test_preferred_first_stays_first_and_remaining_order_is_optimized(
+        self,
+        mock_get_travel,
+    ):
+        places = [
+            location("A", 1.0),
+            {**location("B", 3.0), "preferred_first": True},
+            location("C", 2.0),
+        ]
+
+        result = optimize_course_order(
+            location("start", 0.0),
+            places,
+            available_time_minutes=200,
+        )
+
+        self.assertEqual(
+            [place["name"] for place in result["optimized_places"]],
+            ["B", "C", "A"],
+        )
+        self.assertCountEqual(result["optimized_places"], places)
+
+    @patch("route_travel_time.get_travel")
+    def test_preferred_first_skips_failed_order_and_keeps_complete_places(
+        self,
+        mock_get_travel,
+    ):
+        def travel_with_failed_b_to_a(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            transport_mode="auto",
+        ):
+            if (start_x, end_x) == (3.0, 1.0):
+                return None
+            return {"duration_min": abs(end_x - start_x) * 10}
+
+        mock_get_travel.side_effect = travel_with_failed_b_to_a
+        places = [
+            location("A", 1.0),
+            {**location("B", 3.0), "preferred_first": True},
+            location("C", 2.0),
+        ]
+
+        result = optimize_course_order(
+            location("start", 0.0),
+            places,
+            available_time_minutes=200,
+        )
+
+        self.assertEqual(
+            [place["name"] for place in result["optimized_places"]],
+            ["B", "C", "A"],
+        )
+        self.assertCountEqual(result["optimized_places"], places)
+        failed_leg_calls = [
+            mock_call
+            for mock_call in mock_get_travel.call_args_list
+            if mock_call.args[:4] == (3.0, 37.0, 1.0, 37.0)
+        ]
+        self.assertEqual(len(failed_leg_calls), 1)
+
+    @patch("route_travel_time.get_travel", return_value=None)
+    def test_preferred_first_fails_when_all_complete_orders_fail(
+        self,
+        mock_get_travel,
+    ):
+        with self.assertRaisesRegex(RuntimeError, "모든 방문 순서"):
+            optimize_course_order(
+                location("start", 0.0),
+                [
+                    location("A", 1.0),
+                    {**location("B", 2.0), "preferred_first": True},
+                    location("C", 3.0),
+                ],
+                available_time_minutes=200,
+            )
+
+        self.assertEqual(mock_get_travel.call_count, 1)
+
+    @patch("route_travel_time.get_travel", side_effect=distance_based_travel)
     def test_keeps_end_location_fixed(self, mock_get_travel):
         result = optimize_course_order(
             location("start", 0.0),

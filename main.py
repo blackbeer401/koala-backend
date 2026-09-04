@@ -1,5 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from auth_routes import router as auth_router
+from course_routes import (
+    calculate_course as calculate_course_route,
+    router as course_router,
+)
 
 from place_recommendation_service import recommend_places
 from region_recommendation_service import recommend_regions
@@ -45,6 +49,7 @@ from course_order_optimizer import optimize_course_order
 # 1. FastAPI 앱 생성
 app = FastAPI()
 app.include_router(auth_router)
+app.include_router(course_router)
 
 
 # 2. 서버 기본 동작 확인
@@ -225,49 +230,12 @@ def validate_place_selection(
     }
 
 
-@app.post("/recommend/course")
 def calculate_course(
     request: CourseCalculationRequest,
 ):
-    selected_places = []
-    for place in request.selected_places:
-        place_data = place.model_dump()
-        place_data["activity"] = place_data["category"]
-        selected_places.append(place_data)
+    """기존 직접 호출 테스트를 위한 호환 함수."""
 
-    try:
-        course_result = optimize_course_order(
-            start_location=request.start_location.model_dump(),
-            selected_places=selected_places,
-            available_time_minutes=request.available_time_minutes,
-            end_location=(
-                request.end_location.model_dump()
-                if request.end_location is not None
-                else None
-            ),
-            transport_mode=request.transport_mode,
-        )
-
-        cleaned_optimized_places = []
-
-        for place in course_result["optimized_places"]:
-            cleaned_place = place.copy()
-            cleaned_place.pop("activity", None)
-            cleaned_place.pop("preferred_first", None)
-            cleaned_optimized_places.append(cleaned_place)
-
-        course_result["optimized_places"] = cleaned_optimized_places
-
-        return course_result
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        ) from error
-
-    except RuntimeError as error:
-        raise HTTPException(
-            status_code=502,
-            detail=str(error),
-        ) from error
+    return calculate_course_route(
+        request,
+        optimize_course_order_fn=optimize_course_order,
+    )

@@ -10,6 +10,9 @@ from place_routes import (
     validate_place_selection as validate_place_selection_route,
     router as place_router,
 )
+from region_routes import (
+    create_region_router,
+)
 
 from place_recommendation_service import recommend_places
 from region_recommendation_service import recommend_regions
@@ -77,9 +80,9 @@ def test_poi():
     }
 
 
-# 4. 지역 추천 API
-@app.post("/recommend")
 def recommend(request: RecommendRequest):
+    """기존 직접 호출 테스트를 위한 호환 함수."""
+
     return recommend_regions(
         request,
         parse_user_intent_fn=parse_user_intent,
@@ -90,6 +93,9 @@ def recommend(request: RecommendRequest):
         load_poi_activity_scores_fn=load_poi_activity_scores,
         get_congestion_data_fn=get_congestion_data,
     )
+
+
+app.include_router(create_region_router(recommend))
 
 
 def recommend_actual_places(

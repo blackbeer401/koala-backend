@@ -7,6 +7,7 @@ from course_routes import (
 from place_routes import (
     recommend_actual_places as recommend_actual_places_route,
     recommend_more_actual_places as recommend_more_actual_places_route,
+    validate_place_selection as validate_place_selection_route,
     router as place_router,
 )
 
@@ -114,79 +115,16 @@ def recommend_more_actual_places(
     )
 
 
-@app.post("/recommend/places/validate-selection")
 def validate_place_selection(
     request: PlaceSelectionValidationRequest,
 ):
-    selected_places = [
-        place.model_dump()
-        for place in request.selected_places
-    ]
-    validation_result = validate_selected_places_stay_time(
-        [
-            {
-                "activity": place["category"],
-                "specified_duration_minutes": place.get(
-                    "specified_duration_minutes"
-                ),
-            }
-            for place in selected_places
-        ],
-        request.available_time_minutes,
-    )
-    estimated_travel_result = calculate_estimated_route_travel_minutes(
-        start_latitude=request.start_latitude,
-        start_longitude=request.start_longitude,
-        selected_places=selected_places,
-    )
+    """기존 직접 호출 테스트를 위한 호환 함수."""
 
-    estimated_travel_minutes = estimated_travel_result[
-        "estimated_travel_minutes"
-    ]
-
-    estimated_total_required_minutes = (
-        validation_result["total_stay_duration_minutes"]
-        + estimated_travel_minutes
+    return validate_place_selection_route(
+        request,
+        validate_selected_places_stay_time,
+        calculate_estimated_route_travel_minutes,
     )
-
-    estimated_minimum_required_minutes = (
-        validation_result["total_minimum_stay_duration_minutes"]
-        + estimated_travel_minutes
-    )
-    # 예상 이동시간까지 포함했을 때
-    # 현재 선택이 시간상 빡빡할 가능성이 있는지 확인한다.
-    travel_time_warning = (
-        estimated_minimum_required_minutes
-        > request.available_time_minutes
-    )
-    return {
-        "status": validation_result["status"],
-        "selected_places": selected_places,
-
-        "stay_time_validation": {
-            key: value
-            for key, value in validation_result.items()
-            if key != "status"
-        } | {
-            "available_time_minutes": request.available_time_minutes,
-        },
-
-        # 선택 중 위도·경도를 이용해 계산한
-        # 대략적인 이동시간 사전검증 결과
-        "travel_time_precheck": {
-            "estimated_travel_minutes": estimated_travel_minutes,
-            "estimated_total_required_minutes": (
-                estimated_total_required_minutes
-            ),
-            "estimated_minimum_required_minutes": (
-                estimated_minimum_required_minutes
-            ),
-            "warning": travel_time_warning,
-            "estimated_order": estimated_travel_result[
-                "estimated_order"
-            ],
-        },
-    }
 
 
 def calculate_course(

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from auth_routes import router as auth_router
 
 from datetime import datetime
 
@@ -77,6 +78,7 @@ from course_order_optimizer import optimize_course_order
 
 # 1. FastAPI 앱 생성
 app = FastAPI()
+app.include_router(auth_router)
 
 
 # 2. 서버 기본 동작 확인

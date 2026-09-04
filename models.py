@@ -446,3 +446,52 @@ class PlaceRecommendRequest(BaseModel):
         "outdoor",
         "any",
     ] | None = None
+
+# 회원 인증 관련 모델
+
+class SignupRequest(BaseModel):
+    email: str = Field(
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=8)
+    nickname: str = Field(min_length=1, max_length=50)
+
+    @field_validator("email", "nickname", mode="before")
+    @classmethod
+    def strip_text_fields(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str):
+        return value.lower()
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(
+        min_length=3,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=1)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class AccessTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    nickname: str
+    created_at: datetime

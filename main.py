@@ -1,15 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from auth_routes import router as auth_router
 from course_routes import (
     calculate_course as calculate_course_route,
     router as course_router,
 )
+from place_routes import (
+    recommend_actual_places as recommend_actual_places_route,
+    recommend_more_actual_places as recommend_more_actual_places_route,
+    router as place_router,
+)
 
 from place_recommendation_service import recommend_places
 from region_recommendation_service import recommend_regions
 from place_recommendation_cache import (
-    PlaceCursorExpiredError,
-    PlaceCursorNotFoundError,
     create_place_recommendation_page,
     get_next_place_recommendation_page,
 )
@@ -50,6 +53,7 @@ from course_order_optimizer import optimize_course_order
 app = FastAPI()
 app.include_router(auth_router)
 app.include_router(course_router)
+app.include_router(place_router)
 
 
 # 2. 서버 기본 동작 확인
@@ -87,72 +91,27 @@ def recommend(request: RecommendRequest):
     )
 
 
-# 실제 장소 추천
-@app.post("/recommend/places")
 def recommend_actual_places(
     request: PlaceRecommendRequest
 ):
-    """
-    지역 추천 이후 사용자가 선택한 지역을 기준으로
-    실제 방문 장소를 추천한다.
-    """
+    """기존 직접 호출 테스트를 위한 호환 함수."""
 
-    ranked_places = recommend_places(
-        area_name=request.area_name,
-        latitude=request.latitude,
-        longitude=request.longitude,
-        activities=request.activities,
-        companions=request.companions,
-        budget_max=request.budget_max,
-        budget_preference=request.budget_preference,
-        space_preference=request.space_preference,
+    return recommend_actual_places_route(
+        request,
+        recommend_places,
+        create_place_recommendation_page,
     )
 
-    page = create_place_recommendation_page(
-        area_name=request.area_name,
-        places=ranked_places,
-    )
 
-    return {
-        "area_name": page.area_name,
-        "places": page.places,
-        "cursor": page.cursor,
-        "has_more": page.has_more,
-        "next_offset": page.next_offset,
-    }
-
-
-@app.post("/recommend/places/more")
 def recommend_more_actual_places(
     request: PlaceRecommendMoreRequest
 ):
-    """기존 candidate pool에서 다음 실제 장소를 반환한다."""
+    """기존 직접 호출 테스트를 위한 호환 함수."""
 
-    try:
-        page = get_next_place_recommendation_page(
-            request.cursor,
-            request.offset,
-        )
-
-    except PlaceCursorExpiredError as error:
-        raise HTTPException(
-            status_code=410,
-            detail="장소 추천 cursor가 만료되었습니다.",
-        ) from error
-
-    except PlaceCursorNotFoundError as error:
-        raise HTTPException(
-            status_code=404,
-            detail="유효하지 않은 장소 추천 cursor입니다.",
-        ) from error
-
-    return {
-        "area_name": page.area_name,
-        "places": page.places,
-        "cursor": page.cursor,
-        "has_more": page.has_more,
-        "next_offset": page.next_offset,
-    }
+    return recommend_more_actual_places_route(
+        request,
+        get_next_place_recommendation_page,
+    )
 
 
 @app.post("/recommend/places/validate-selection")

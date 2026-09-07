@@ -68,6 +68,54 @@ def _normalize_operation_schedule(schedule):
     return normalized_schedule
 
 
+def _get_operation_schedule_status(schedule):
+    if schedule is None or schedule == []:
+        return "missing"
+
+    if not isinstance(schedule, list):
+        return "unparsed"
+
+    valid_count = 0
+
+    for item in schedule:
+        if not isinstance(item, dict):
+            continue
+
+        days = item.get("days")
+        closed = item.get("closed")
+        opening_minutes = _time_to_minutes(item.get("opening_time"))
+        closing_minutes = _time_to_minutes(item.get("closing_time"))
+        valid_days = (
+            isinstance(days, list)
+            and bool(days)
+            and all(
+                day in {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
+                for day in days
+            )
+        )
+
+        if not valid_days or not isinstance(closed, bool):
+            continue
+
+        if closed:
+            if item.get("opening_time") is None and item.get("closing_time") is None:
+                valid_count += 1
+            continue
+
+        if (
+            opening_minutes is not None
+            and opening_minutes < 24 * 60
+            and closing_minutes is not None
+            and opening_minutes != closing_minutes
+        ):
+            valid_count += 1
+
+    if valid_count == len(schedule):
+        return "parsed"
+
+    return "partial" if valid_count else "unparsed"
+
+
 def normalize_popup_place(popup: dict):
     """팝업 한 건을 KOALA의 공통 place dict로 정규화한다."""
 
@@ -102,6 +150,9 @@ def normalize_popup_place(popup: dict):
         "category": category,
         "start_at": popup.get("start_date"),
         "end_at": popup.get("end_date"),
+        "operation_schedule_status": _get_operation_schedule_status(
+            popup.get("operation_schedule")
+        ),
         "operation_schedule": _normalize_operation_schedule(
             popup.get("operation_schedule")
         ),

@@ -6,7 +6,7 @@ from map_service import (
 
 from tour_service import (
     get_tour_sigungu_code,
-    get_hub_places,
+    get_latest_hub_places,
     add_distance_to_places,
     filter_places_by_distance,
 )
@@ -58,6 +58,9 @@ TOUR_ACTIVITY_CATEGORY_MAP = {
     "쇼핑": "shopping",
     "레저스포츠": "entertainment",
 }
+TOUR_PLACE_ACTIVITIES = frozenset(
+    TOUR_ACTIVITY_CATEGORY_MAP.values()
+)
 
 # 실제 provider mapping으로 후보를 확보할 수 있는 activity 순서
 SUPPORTED_PLACE_ACTIVITIES = [
@@ -492,6 +495,14 @@ def recommend_places(
         + normalized_seoul_culture_places
     )
 
+    if not TOUR_PLACE_ACTIVITIES.intersection(
+        active_activities
+    ):
+        return finalize_recommended_places(
+            base_places,
+            active_activities,
+        )
+
     # 1. 추천 지역의 좌표를 기준으로 행정구역을 확인한다.
     try:
         region = get_region_from_coordinates(
@@ -536,9 +547,8 @@ def recommend_places(
     # TourAPI 호출에 실패하더라도
     # 이미 조회된 기본 장소 후보는 유지한다.
     try:
-        places = get_hub_places(
+        places = get_latest_hub_places(
             gu_code=tour_sigungu_code,
-            base_ym="202504",
         )
 
     except Exception:

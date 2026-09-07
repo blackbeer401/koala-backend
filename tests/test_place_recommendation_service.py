@@ -15,6 +15,7 @@ from place_recommendation_service import (
     SUPPORTED_PLACE_ACTIVITIES,
     filter_walk_kakao_places,
     finalize_recommended_places,
+    normalize_tour_places,
     recommend_places,
     resolve_place_activities,
 )
@@ -155,6 +156,22 @@ class ActivityPolicyTests(unittest.TestCase):
             calculate_distance_score(1000),
         )
         self.assertEqual(result[0]["distance_score"], 50.0)
+
+    def test_existing_tour_activity_mapping_is_unchanged(self):
+        places = [
+            {
+                "mapX": "126.9",
+                "mapY": "37.5",
+                "hubTatsNm": category,
+                "hubCtgryMclsNm": category,
+            }
+            for category in ("문화관광", "레저스포츠", "쇼핑")
+        ]
+
+        self.assertEqual(
+            [place["category"] for place in normalize_tour_places(places)],
+            ["culture", "entertainment", "shopping"],
+        )
 
 
 class PlaceRecommendationCacheTests(unittest.TestCase):
@@ -477,7 +494,7 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
             max_distance_m=2000,
         )
 
-    @patch("place_recommendation_service.get_hub_places")
+    @patch("place_recommendation_service.get_latest_hub_places")
     @patch(
         "place_recommendation_service.get_region_from_coordinates",
         return_value={"sigungu_name": "마포구"},
@@ -492,10 +509,10 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
         mock_search_places,
         mock_get_exhibitions,
         mock_get_region,
-        mock_get_hub_places,
+        mock_get_latest_hub_places,
     ):
         mock_search_places.return_value = make_kakao_places(1, prefix="문화")
-        mock_get_hub_places.return_value = [{
+        mock_get_latest_hub_places.return_value = [{
             "mapX": "126.9",
             "mapY": "37.5",
             "hubTatsNm": "Tour 문화",
@@ -553,6 +570,226 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
             ["현재 전시"],
         )
 
+    @patch("place_recommendation_service.get_latest_hub_places")
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value={"sigungu_name": "마포구"},
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=make_kakao_places(1, prefix="음식"),
+    )
+    def test_non_tour_activity_skips_tour_and_keeps_kakao_results(
+        self,
+        mock_search_places,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            [place["category"] for place in ranked_places],
+            ["food"],
+        )
+        mock_get_region.assert_not_called()
+        mock_get_latest_hub_places.assert_not_called()
+
+    @patch("place_recommendation_service.get_latest_hub_places")
+    @patch("place_recommendation_service.get_region_from_coordinates")
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_each_non_tour_activity_skips_tour_path(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_exhibitions,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        for activity in ("food", "cafe", "walk", "drink"):
+            with self.subTest(activity=activity):
+                recommend_places(
+                    area_name="테스트 지역",
+                    latitude=37.5,
+                    longitude=126.9,
+                    activities=[activity],
+                    companions=[],
+                    budget_max=None,
+                    budget_preference=None,
+                    space_preference=None,
+                )
+
+        mock_get_region.assert_not_called()
+        mock_get_latest_hub_places.assert_not_called()
+
+    @patch("place_recommendation_service.get_latest_hub_places")
+    @patch("place_recommendation_service.get_region_from_coordinates")
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_non_tour_activity_mix_skips_tour_path(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food", "cafe", "walk", "drink"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        mock_get_region.assert_not_called()
+        mock_get_latest_hub_places.assert_not_called()
+
+    @patch(
+        "place_recommendation_service.get_latest_hub_places",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value={"sigungu_name": "마포구"},
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_each_tour_activity_enters_tour_path(
+        self,
+        mock_search_category,
+        mock_get_exhibitions,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        for activity in ("culture", "entertainment", "shopping"):
+            with self.subTest(activity=activity):
+                recommend_places(
+                    area_name="테스트 지역",
+                    latitude=37.5,
+                    longitude=126.9,
+                    activities=[activity],
+                    companions=[],
+                    budget_max=None,
+                    budget_preference=None,
+                    space_preference=None,
+                )
+
+        self.assertEqual(mock_get_region.call_count, 3)
+        self.assertEqual(mock_get_latest_hub_places.call_count, 3)
+
+    @patch(
+        "place_recommendation_service.get_latest_hub_places",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value={"sigungu_name": "마포구"},
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_mixed_tour_and_non_tour_activities_enter_tour_path(
+        self,
+        mock_search_category,
+        mock_get_exhibitions,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food", "culture"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        mock_get_region.assert_called_once()
+        mock_get_latest_hub_places.assert_called_once()
+
+    @patch(
+        "place_recommendation_service.get_latest_hub_places",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value={"sigungu_name": "마포구"},
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_empty_activities_enter_tour_path(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_exhibitions,
+        mock_get_region,
+        mock_get_latest_hub_places,
+    ):
+        recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=[],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        mock_get_region.assert_called_once()
+        mock_get_latest_hub_places.assert_called_once()
+
     @patch(
         "place_recommendation_service.get_region_from_coordinates",
         return_value=None,
@@ -606,9 +843,9 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
 
         self.assertEqual(len(page.places), 6)
         self.assertTrue(page.has_more)
-        mock_get_region.assert_called_once()
+        mock_get_region.assert_not_called()
 
-    @patch("place_recommendation_service.get_hub_places")
+    @patch("place_recommendation_service.get_latest_hub_places")
     @patch(
         "place_recommendation_service.get_region_from_coordinates",
         return_value={"sigungu_name": "마포구"},
@@ -618,10 +855,10 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
         self,
         mock_search_places,
         mock_get_region,
-        mock_get_hub_places,
+        mock_get_latest_hub_places,
     ):
         mock_search_places.return_value = make_kakao_places(8)
-        mock_get_hub_places.return_value = [
+        mock_get_latest_hub_places.return_value = [
             {
                 "mapX": "126.9",
                 "mapY": "37.5",
@@ -644,8 +881,10 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
 
         self.assertEqual(len(page.places), 6)
         self.assertTrue(page.has_more)
-        mock_get_hub_places.assert_called_once()
+        mock_get_region.assert_not_called()
+        mock_get_latest_hub_places.assert_not_called()
 
+    @patch("place_recommendation_service.get_latest_hub_places")
     @patch(
         "place_recommendation_service.get_region_from_coordinates",
         return_value=None,
@@ -655,6 +894,7 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
         self,
         mock_search_places,
         mock_get_region,
+        mock_get_latest_hub_places,
     ):
         mock_search_places.return_value = make_kakao_places(8)
         ranked_places = recommend_places(
@@ -681,6 +921,7 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
 
         self.assertEqual(mock_search_places.call_count, search_call_count)
         self.assertEqual(mock_get_region.call_count, region_call_count)
+        mock_get_latest_hub_places.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import os
 import math
+from datetime import date
 
 import requests
 from dotenv import load_dotenv
@@ -20,6 +21,7 @@ HUB_PLACE_API_URL = (
     "LocgoHubTarService1/"
     "areaBasedList1"
 )
+TOUR_BASE_YM_LOOKBACK_MONTHS = 6
 
 # 서울 25개 자치구 → TourAPI 시군구 코드
 SEOUL_TOUR_SIGUNGU_CODES = {
@@ -187,11 +189,47 @@ def get_hub_places(
         )
 
     body = data["response"]["body"]
-    items = body.get("items", {}).get("item", [])
+    items_container = body.get("items")
+
+    if not isinstance(items_container, dict):
+        return []
+
+    items = items_container.get("item", [])
 
     # 장소가 1개만 오는 경우 dict 형태일 수 있으므로 list로 통일한다.
     if isinstance(items, dict):
         items = [items]
 
     return items
+
+
+def get_latest_hub_places(
+    gu_code: str,
+    reference_date: date | None = None,
+    lookback_months: int = TOUR_BASE_YM_LOOKBACK_MONTHS,
+):
+    """현재월부터 제한된 기간만 역순으로 조회해 최신 공개 데이터를 반환한다."""
+
+    current_date = reference_date or date.today()
+    current_month_index = (
+        current_date.year * 12
+        + current_date.month
+        - 1
+    )
+
+    for month_offset in range(lookback_months):
+        year, zero_based_month = divmod(
+            current_month_index - month_offset,
+            12,
+        )
+        base_ym = f"{year}{zero_based_month + 1:02d}"
+        places = get_hub_places(
+            gu_code=gu_code,
+            base_ym=base_ym,
+        )
+
+        if places:
+            return places
+
+    return []
 

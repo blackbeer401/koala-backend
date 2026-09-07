@@ -1,3 +1,6 @@
+from datetime import date, datetime
+from pathlib import Path
+
 from map_service import (
     get_region_from_coordinates,
     search_places_by_category,
@@ -16,9 +19,18 @@ from place_ranking import (
     sort_places_by_score,
 )
 from seoul_culture_service import (
+    SEOUL_TIMEZONE,
     SeoulCultureAPIError,
+    calculate_distance_m,
     get_nearby_current_exhibitions,
 )
+from popup_service import PopupDataError, load_popup_places
+
+POPUP_DATA_PATH = Path(__file__).resolve().parent / "data" / "20260904_popup_places.json"
+POPUP_MAX_DISTANCE_M = 2000
+POPUP_ACTIVITIES = frozenset({
+    "shopping", "entertainment", "food", "cafe", "culture",
+})
 
 # 우리 서비스 활동 카테고리 → Kakao 장소 카테고리 코드
 KAKAO_ACTIVITY_CATEGORY_CODES = {
@@ -312,6 +324,48 @@ def normalize_tour_places(
     return normalized_places
 
 
+def filter_current_nearby_popup_places(
+    places: list[dict],
+    active_activities: list[str],
+    latitude: float,
+    longitude: float,
+    reference_date: date | None = None,
+):
+    """현재 진행 중이며 중심 좌표 2km 안인 팝업만 남긴다."""
+
+    today = reference_date or datetime.now(SEOUL_TIMEZONE).date()
+    filtered_places = []
+
+    for place in places:
+        if place.get("category") not in active_activities:
+            continue
+
+        try:
+            start_at = date.fromisoformat(place.get("start_at"))
+            end_at = date.fromisoformat(place.get("end_at"))
+        except (TypeError, ValueError):
+            continue
+
+        if not start_at <= today <= end_at:
+            continue
+
+        distance_m = calculate_distance_m(
+            latitude,
+            longitude,
+            place["latitude"],
+            place["longitude"],
+        )
+
+        if distance_m > POPUP_MAX_DISTANCE_M:
+            continue
+
+        nearby_place = place.copy()
+        nearby_place["distance_m"] = distance_m
+        filtered_places.append(nearby_place)
+
+    return filtered_places
+
+
 def resolve_place_activities(
     activities: list[str],
 ):
@@ -490,9 +544,23 @@ def recommend_places(
         except SeoulCultureAPIError:
             normalized_seoul_culture_places = []
 
+    normalized_popup_places = []
+
+    if POPUP_ACTIVITIES.intersection(active_activities):
+        try:
+            normalized_popup_places = filter_current_nearby_popup_places(
+                load_popup_places(POPUP_DATA_PATH),
+                active_activities,
+                latitude,
+                longitude,
+            )
+        except PopupDataError:
+            normalized_popup_places = []
+
     base_places = (
         normalized_kakao_places
         + normalized_seoul_culture_places
+        + normalized_popup_places
     )
 
     if not TOUR_PLACE_ACTIVITIES.intersection(
@@ -598,6 +666,7 @@ def recommend_places(
         normalized_kakao_places
         + filtered_tour_places
         + normalized_seoul_culture_places
+        + normalized_popup_places
     )
 
     # 9. 정상 경로와 fallback 경로가 같은 정책을 사용하도록

@@ -44,6 +44,93 @@ SEOUL_LONGITUDE_RANGE = (126.75, 127.20)
 
 SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 
+OPERATION_DAY_CODES = {
+    "월": "MON",
+    "화": "TUE",
+    "수": "WED",
+    "목": "THU",
+    "금": "FRI",
+    "토": "SAT",
+    "일": "SUN",
+}
+OPERATION_ALL_DAYS = tuple(OPERATION_DAY_CODES.values())
+
+_DAY_TOKEN_PATTERN = r"[월화수목금토일](?:요일)?"
+_DAY_EXPRESSION_PATTERN = re.compile(
+    rf"(?<![가-힣\d])(?:매주\s*)?(?:"
+    rf"평일|주말|매일|연중무휴|"
+    rf"{_DAY_TOKEN_PATTERN}(?:"
+    rf"\s*(?:-|~|∼|～|–|—|부터)\s*{_DAY_TOKEN_PATTERN}"
+    rf"|(?:\s*(?:[,/·.]|및)\s*{_DAY_TOKEN_PATTERN})+"
+    rf")?"
+    rf")(?![가-힣\d])"
+)
+
+
+def _time_token_pattern(prefix: str):
+    return (
+        rf"(?P<{prefix}_raw>"
+        rf"(?:(?P<{prefix}_ampm>오전|오후)\s*)?"
+        rf"(?P<{prefix}_hour>\d{{1,2}})"
+        rf"(?:"
+        rf":\s*(?P<{prefix}_minute>\d{{1,2}})"
+        rf"|시(?:\s*(?P<{prefix}_korean_minute>\d{{1,2}})\s*분?)?"
+        rf")"
+        rf")"
+    )
+
+
+_TIME_RANGE_PATTERN = re.compile(
+    rf"(?<!\d){_time_token_pattern('open')}"
+    rf"\s*(?:~|∼|～|-|–|—|부터)\s*"
+    rf"{_time_token_pattern('close')}(?:\s*까지)?"
+)
+
+_BREAK_TIME_RANGE_PATTERN = re.compile(
+    rf"(?:break\s*time|브레이크\s*타임|휴게\s*시간)"
+    rf"\s*[:：]?\s*{_time_token_pattern('break_open')}"
+    rf"\s*(?:~|∼|～|-|–|—|부터)\s*"
+    rf"{_time_token_pattern('break_close')}(?:\s*까지)?",
+    re.IGNORECASE,
+)
+
+_CLOSING_TIME_OVERRIDE_PATTERN = re.compile(
+    rf"(?<!\d){_time_token_pattern('override_close')}"
+    rf"\s*까지\s*(?:야간\s*)?(?:개관|운영)"
+)
+
+_CLOSED_SIGNALS = (
+    "휴무",
+    "휴관",
+    "운영 안 함",
+    "운영안함",
+    "쉬는 날",
+)
+
+_PARTIAL_OPERATION_SIGNALS = (
+    "공휴일",
+    "추석",
+    "설날",
+    "연휴",
+    "1월 1일",
+    "매월",
+    "첫째",
+    "둘째",
+    "셋째",
+    "넷째",
+    "마지막",
+    "우천",
+    "변동",
+    "상이",
+    "홈페이지",
+    "문의",
+    "입장 마감",
+    "입장마감",
+    "매표마감",
+    "입장가능",
+    "예약",
+)
+
 
 class SeoulCultureAPIError(RuntimeError):
     """서울 문화행사 API 호출 또는 응답 형식 오류."""
@@ -649,6 +736,524 @@ def _normalize_is_free(value: str | None):
     return None
 
 
+def _operation_hours_raw_blocks(value: str | None):
+    """운영시간 원문을 내용을 바꾸지 않고 줄 단위 배열로 보존한다."""
+
+    if value is None:
+        return []
+
+    raw_text = str(value).strip()
+
+    if not raw_text:
+        return []
+
+    blocks = [
+        line.strip()
+        for line in raw_text.splitlines()
+        if line.strip()
+    ]
+
+    return blocks or [raw_text]
+
+
+def _expand_operation_days(expression: str):
+    """요일 표현을 MON~SUN 배열로 변환한다."""
+
+    normalized = unicodedata.normalize(
+        "NFKC",
+        str(expression or ""),
+    )
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized = normalized.replace("요일", "")
+    normalized = re.sub(r"^매주", "", normalized)
+
+    aliases = {
+        "평일": list(OPERATION_ALL_DAYS[:5]),
+        "주말": list(OPERATION_ALL_DAYS[5:]),
+        "매일": list(OPERATION_ALL_DAYS),
+        "연중무휴": list(OPERATION_ALL_DAYS),
+    }
+
+    if normalized in aliases:
+        return aliases[normalized]
+
+    day_tokens = re.findall(
+        r"[월화수목금토일]",
+        normalized,
+    )
+
+    if not day_tokens:
+        return []
+
+    has_range = bool(
+        re.search(r"(?:-|~|∼|～|–|—|부터)", normalized)
+    )
+
+    if has_range and len(day_tokens) >= 2:
+        day_keys = list(OPERATION_DAY_CODES)
+        start_index = day_keys.index(day_tokens[0])
+        end_index = day_keys.index(day_tokens[1])
+        expanded = []
+        index = start_index
+
+        while True:
+            expanded.append(
+                OPERATION_DAY_CODES[day_keys[index]]
+            )
+
+            if index == end_index:
+                break
+
+            index = (index + 1) % len(day_keys)
+
+        return expanded
+
+    unique_days = []
+
+    for day_token in day_tokens:
+        day_code = OPERATION_DAY_CODES[day_token]
+
+        if day_code not in unique_days:
+            unique_days.append(day_code)
+
+    return unique_days
+
+
+def _normalize_operation_time(match, prefix: str):
+    """정규식 시간 그룹을 HH:MM으로 변환한다."""
+
+    hour = int(match.group(f"{prefix}_hour"))
+    minute_text = (
+        match.group(f"{prefix}_minute")
+        or match.group(f"{prefix}_korean_minute")
+        or "0"
+    )
+    minute = int(minute_text)
+    ampm = match.group(f"{prefix}_ampm")
+
+    if minute > 59:
+        return None
+
+    if ampm:
+        if hour < 1 or hour > 12:
+            return None
+
+        if ampm == "오전":
+            hour = 0 if hour == 12 else hour
+        else:
+            hour = 12 if hour == 12 else hour + 12
+
+    elif hour > 24 or (hour == 24 and minute != 0):
+        return None
+
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _time_to_minutes(value: str):
+    hour, minute = value.split(":")
+    return int(hour) * 60 + int(minute)
+
+
+def _extract_operation_time_ranges(text: str):
+    """안전하게 해석 가능한 시작~종료 시간만 반환한다."""
+
+    ranges = []
+    rejected_count = 0
+
+    for match in _TIME_RANGE_PATTERN.finditer(text):
+        opening_time = _normalize_operation_time(
+            match,
+            "open",
+        )
+        closing_time = _normalize_operation_time(
+            match,
+            "close",
+        )
+
+        # "오전 9시~6시"처럼 뒤쪽 오전/오후가 생략된
+        # 12시간제 표현은 임의로 추측하지 않는다.
+        if (
+            match.group("open_ampm")
+            and not match.group("close_ampm")
+            and int(match.group("close_hour")) <= 12
+        ):
+            rejected_count += 1
+            continue
+
+        if opening_time is None or closing_time is None:
+            rejected_count += 1
+            continue
+
+        # 자정을 넘기는 운영시간은 현재 목표 구조만으로 종료일을
+        # 표현할 수 없으므로 원문만 보존한다.
+        if _time_to_minutes(closing_time) <= _time_to_minutes(
+            opening_time
+        ):
+            rejected_count += 1
+            continue
+
+        ranges.append((opening_time, closing_time))
+
+    return ranges, rejected_count
+
+
+def _extract_operation_time_ranges_with_breaks(text: str):
+    """휴게시간을 운영시간으로 잘못 넣지 않고 운영 구간을 나눈다."""
+
+    ranges, rejected_count = _extract_operation_time_ranges(text)
+    break_ranges = []
+
+    for match in _BREAK_TIME_RANGE_PATTERN.finditer(text):
+        opening_time = _normalize_operation_time(
+            match,
+            "break_open",
+        )
+        closing_time = _normalize_operation_time(
+            match,
+            "break_close",
+        )
+
+        if (
+            opening_time is None
+            or closing_time is None
+            or _time_to_minutes(closing_time)
+            <= _time_to_minutes(opening_time)
+        ):
+            rejected_count += 1
+            continue
+
+        break_ranges.append((opening_time, closing_time))
+
+    if not break_ranges:
+        return ranges, rejected_count
+
+    # 전체 운영시간 안에 포함된 휴게시간만 닫힌 구간으로 해석한다.
+    opening_ranges = [
+        item
+        for item in ranges
+        if item not in break_ranges
+    ]
+
+    for break_open, break_close in break_ranges:
+        split_ranges = []
+
+        for opening_time, closing_time in opening_ranges:
+            if (
+                _time_to_minutes(opening_time)
+                < _time_to_minutes(break_open)
+                < _time_to_minutes(break_close)
+                < _time_to_minutes(closing_time)
+            ):
+                split_ranges.extend([
+                    (opening_time, break_open),
+                    (break_close, closing_time),
+                ])
+            else:
+                split_ranges.append(
+                    (opening_time, closing_time)
+                )
+
+        opening_ranges = split_ranges
+
+    return opening_ranges, rejected_count
+
+
+def _is_specific_date_day_match(text: str, day_match):
+    """9.2(수)처럼 특정 날짜에 붙은 요일인지 확인한다."""
+
+    prefix = text[max(0, day_match.start() - 24):day_match.start()]
+
+    return bool(
+        re.search(
+            r"\d{1,2}\s*[./-]\s*\d{1,2}\s*\($",
+            prefix,
+        )
+    )
+
+
+def _operation_days_except(excluded_days):
+    excluded = set(excluded_days)
+    return [
+        day
+        for day in OPERATION_ALL_DAYS
+        if day not in excluded
+    ]
+
+
+def _has_nonweekly_operation_variants(text: str):
+    """현재 요일 스키마로 안전하게 표현할 수 없는 변형인지 확인한다."""
+
+    normalized = re.sub(r"\s+", "", text).lower()
+
+    if "동절기" in normalized:
+        return True
+
+    if (
+        "주간" in normalized
+        and "야간" in normalized
+        and "전환" in normalized
+    ):
+        return True
+
+    if re.search(
+        r"\[\d{1,2}-\d{1,2}월\]",
+        normalized,
+    ):
+        return True
+
+    # 전시 자체는 상시 운영이고 프로그램 시간만 따로 적힌 경우,
+    # 프로그램 시간을 장소 운영시간으로 사용하지 않는다.
+    if (
+        "[전시]" in normalized
+        and "[프로그램]" in normalized
+        and "상시운영" in normalized
+    ):
+        return True
+
+    return False
+
+
+def parse_operation_hours(value: str | None):
+    """
+    서울문화행사 PRO_TIME을 요일별 운영시간으로 변환한다.
+
+    확실하게 해석할 수 없는 내용은 추측하지 않고 원문과
+    parsed/partial/unparsed/missing 상태로 남긴다.
+    """
+
+    raw_blocks = _operation_hours_raw_blocks(value)
+
+    if not raw_blocks:
+        return {
+            "raw_text": None,
+            "raw_blocks": [],
+            "schedule": [],
+            "status": "missing",
+        }
+
+    raw_text = str(value).strip()
+    parse_text = unicodedata.normalize("NFKC", raw_text)
+
+    if _has_nonweekly_operation_variants(parse_text):
+        return {
+            "raw_text": raw_text,
+            "raw_blocks": raw_blocks,
+            "schedule": [],
+            "status": "unparsed",
+        }
+
+    all_day_matches = list(
+        _DAY_EXPRESSION_PATTERN.finditer(parse_text)
+    )
+    specific_date_day_ignored = any(
+        _is_specific_date_day_match(parse_text, day_match)
+        for day_match in all_day_matches
+    )
+    day_matches = [
+        day_match
+        for day_match in all_day_matches
+        if not _is_specific_date_day_match(
+            parse_text,
+            day_match,
+        )
+    ]
+    schedule = []
+    unresolved_segment = False
+    rejected_range_count = 0
+
+    for index, day_match in enumerate(day_matches):
+        segment_end = (
+            day_matches[index + 1].start()
+            if index + 1 < len(day_matches)
+            else len(parse_text)
+        )
+        segment = parse_text[day_match.start():segment_end]
+        days = _expand_operation_days(day_match.group())
+
+        if not days:
+            unresolved_segment = True
+            continue
+
+        is_closed = any(
+            signal in segment
+            for signal in _CLOSED_SIGNALS
+        )
+
+        if is_closed:
+            # "10:00~18:00, 일요일 휴관"처럼 운영시간이 먼저
+            # 나오고 첫 요일 정보가 휴무일인 경우, 명시된 휴무일을
+            # 제외한 요일에 앞쪽 운영시간을 연결한다.
+            if index == 0 and not schedule:
+                prefix_ranges, prefix_rejected = (
+                    _extract_operation_time_ranges_with_breaks(
+                        parse_text[:day_match.start()]
+                    )
+                )
+                rejected_range_count += prefix_rejected
+                open_days = _operation_days_except(days)
+
+                for opening_time, closing_time in prefix_ranges:
+                    if open_days:
+                        schedule.append({
+                            "days": open_days,
+                            "opening_time": opening_time,
+                            "closing_time": closing_time,
+                            "closed": False,
+                        })
+
+            # "월요일 휴무, 12:00~19:00"처럼 시간이 휴무
+            # 표현 뒤에 오는 경우에도 나머지 요일에 연결한다.
+            suffix_ranges, suffix_rejected = (
+                _extract_operation_time_ranges_with_breaks(
+                    segment[day_match.end() - day_match.start():]
+                )
+            )
+            rejected_range_count += suffix_rejected
+            open_days = _operation_days_except(days)
+
+            for opening_time, closing_time in suffix_ranges:
+                if open_days:
+                    schedule.append({
+                        "days": open_days,
+                        "opening_time": opening_time,
+                        "closing_time": closing_time,
+                        "closed": False,
+                    })
+
+            schedule.append({
+                "days": days,
+                "opening_time": None,
+                "closing_time": None,
+                "closed": True,
+            })
+            continue
+
+        time_ranges, rejected_count = (
+            _extract_operation_time_ranges_with_breaks(segment)
+        )
+        rejected_range_count += rejected_count
+
+        # "10:00~18:00, 매일"처럼 시간이 요일보다 먼저
+        # 나온 경우 첫 요일 표현에만 앞쪽 시간을 연결한다.
+        if not time_ranges and index == 0:
+            prefix_ranges, prefix_rejected = (
+                _extract_operation_time_ranges_with_breaks(
+                    parse_text[:day_match.start()]
+                )
+            )
+            time_ranges = prefix_ranges
+            rejected_range_count += prefix_rejected
+
+        if not time_ranges:
+            closing_match = _CLOSING_TIME_OVERRIDE_PATTERN.search(
+                segment
+            )
+
+            if closing_match:
+                closing_time = _normalize_operation_time(
+                    closing_match,
+                    "override_close",
+                )
+                base_item = next(
+                    (
+                        item
+                        for item in reversed(schedule)
+                        if not item["closed"]
+                        and any(
+                            day in item["days"]
+                            for day in days
+                        )
+                    ),
+                    None,
+                )
+
+                if closing_time is not None and base_item:
+                    opening_time = base_item["opening_time"]
+
+                    if (
+                        _time_to_minutes(closing_time)
+                        > _time_to_minutes(opening_time)
+                    ):
+                        for item in schedule:
+                            if not item["closed"]:
+                                item["days"] = [
+                                    day
+                                    for day in item["days"]
+                                    if day not in days
+                                ]
+
+                        schedule.append({
+                            "days": days,
+                            "opening_time": opening_time,
+                            "closing_time": closing_time,
+                            "closed": False,
+                        })
+                        continue
+
+            unresolved_segment = True
+            continue
+
+        for opening_time, closing_time in time_ranges:
+            schedule.append({
+                "days": days,
+                "opening_time": opening_time,
+                "closing_time": closing_time,
+                "closed": False,
+            })
+
+    closed_days = {
+        day
+        for item in schedule
+        if item["closed"]
+        for day in item["days"]
+    }
+    cleaned_schedule = []
+
+    for item in schedule:
+        cleaned_item = dict(item)
+
+        if not cleaned_item["closed"]:
+            cleaned_item["days"] = [
+                day
+                for day in cleaned_item["days"]
+                if day not in closed_days
+            ]
+
+            if not cleaned_item["days"]:
+                continue
+
+        if cleaned_item not in cleaned_schedule:
+            cleaned_schedule.append(cleaned_item)
+
+    has_partial_signal = any(
+        signal in parse_text
+        for signal in _PARTIAL_OPERATION_SIGNALS
+    )
+
+    if not cleaned_schedule:
+        status = "unparsed"
+    elif (
+        unresolved_segment
+        or rejected_range_count > 0
+        or has_partial_signal
+        or specific_date_day_ignored
+        or not any(
+            not item["closed"]
+            for item in cleaned_schedule
+        )
+    ):
+        status = "partial"
+    else:
+        status = "parsed"
+
+    return {
+        "raw_text": raw_text,
+        "raw_blocks": raw_blocks,
+        "schedule": cleaned_schedule,
+        "status": status,
+    }
+
+
 def normalize_seoul_culture_event(
     event: dict,
     reference_date: date | datetime | None = None,
@@ -702,6 +1307,9 @@ def normalize_seoul_culture_event(
         str(event.get("USE_FEE") or "").strip()
         or None
     )
+    operation_hours = parse_operation_hours(
+        event.get("PRO_TIME")
+    )
 
     return {
         # 기존 Kakao/Tour 공통 필드
@@ -731,10 +1339,11 @@ def normalize_seoul_culture_event(
             if end_date
             else None
         ),
-        "opening_hours": (
-            str(event.get("PRO_TIME") or "").strip()
-            or None
-        ),
+        # opening_hours는 기존 연결부와의 호환을 위해 유지한다.
+        "opening_hours": operation_hours["raw_text"],
+        "operation_hours_raw": operation_hours["raw_blocks"],
+        "operation_schedule": operation_hours["schedule"],
+        "operation_schedule_status": operation_hours["status"],
         "is_free": _normalize_is_free(
             event.get("IS_FREE")
         ),

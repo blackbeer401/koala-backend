@@ -1,7 +1,9 @@
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 from place_ranking import calculate_distance_score
+from popup_service import PopupDataError
 from seoul_culture_service import SeoulCultureAPIError
 from place_recommendation_cache import (
     PLACE_PAGE_SIZE,
@@ -13,6 +15,7 @@ from place_recommendation_cache import (
 )
 from place_recommendation_service import (
     SUPPORTED_PLACE_ACTIVITIES,
+    filter_current_nearby_popup_places,
     filter_walk_kakao_places,
     finalize_recommended_places,
     normalize_tour_places,
@@ -300,12 +303,171 @@ class PlaceRecommendationCacheTests(unittest.TestCase):
             )
 
 
+class PopupRecommendationTests(unittest.TestCase):
+
+    @staticmethod
+    def make_popup(**overrides):
+        popup = {
+            "source": "popup",
+            "source_id": "popup-1",
+            "name": "테스트 팝업",
+            "latitude": 37.5005,
+            "longitude": 126.9005,
+            "category": "shopping",
+            "category_detail": "패션",
+            "address": "서울",
+            "distance_m": None,
+            "start_at": "2026-09-01",
+            "end_at": "2026-09-30",
+            "status": "ACTIVE",
+            "operation_schedule": [{"opening_time": "10:00"}],
+            "description": "설명",
+            "image_url": "https://example.com/image.jpg",
+        }
+        popup.update(overrides)
+        return popup
+
+    def test_date_activity_distance_filters_and_status_is_not_trusted(self):
+        places = [
+            self.make_popup(source_id="active", status="UPCOMING"),
+            self.make_popup(source_id="ended", end_at="2026-09-06"),
+            self.make_popup(source_id="future", start_at="2026-09-08"),
+            self.make_popup(source_id="missing-end", end_at=None),
+            self.make_popup(source_id="wrong-category", category="food"),
+            self.make_popup(
+                source_id="far",
+                latitude=37.6,
+                longitude=127.0,
+            ),
+        ]
+
+        result = filter_current_nearby_popup_places(
+            places,
+            ["shopping"],
+            37.5,
+            126.9,
+            reference_date=date(2026, 9, 7),
+        )
+
+        self.assertEqual([place["source_id"] for place in result], ["active"])
+        self.assertGreater(result[0]["distance_m"], 0)
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    @patch("place_recommendation_service.load_popup_places")
+    def test_supported_popup_categories_join_and_metadata_is_preserved(
+        self,
+        mock_load_popups,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_exhibitions,
+        mock_get_region,
+    ):
+        for category in (
+            "shopping", "culture", "food", "cafe", "entertainment",
+        ):
+            with self.subTest(category=category):
+                mock_load_popups.return_value = [
+                    self.make_popup(category=category)
+                ]
+                result = recommend_places(
+                    area_name="테스트 지역",
+                    latitude=37.5,
+                    longitude=126.9,
+                    activities=[category],
+                    companions=[],
+                    budget_max=None,
+                    budget_preference=None,
+                    space_preference=None,
+                )
+
+                self.assertEqual([place["source"] for place in result], ["popup"])
+                self.assertEqual(result[0]["operation_schedule"], [{"opening_time": "10:00"}])
+                self.assertEqual(result[0]["description"], "설명")
+
+    @patch("place_recommendation_service.load_popup_places")
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=[],
+    )
+    def test_walk_and_drink_do_not_load_popups(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_load_popups,
+    ):
+        for activity in ("walk", "drink"):
+            with self.subTest(activity=activity):
+                recommend_places(
+                    area_name="테스트 지역",
+                    latitude=37.5,
+                    longitude=126.9,
+                    activities=[activity],
+                    companions=[],
+                    budget_max=None,
+                    budget_preference=None,
+                    space_preference=None,
+                )
+
+        mock_load_popups.assert_not_called()
+
+    @patch(
+        "place_recommendation_service.load_popup_places",
+        side_effect=PopupDataError("파일 오류"),
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=make_kakao_places(1, prefix="음식"),
+    )
+    def test_popup_file_error_keeps_existing_recommendations(
+        self,
+        mock_search_category,
+        mock_load_popups,
+    ):
+        result = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual([place["source"] for place in result], ["kakao"])
+
+
 class NormalAndFallbackFlowTests(unittest.TestCase):
 
     def setUp(self):
         clear_place_recommendation_cache()
+        self.popup_loader_patcher = patch(
+            "place_recommendation_service.load_popup_places",
+            return_value=[],
+        )
+        self.popup_loader_patcher.start()
 
     def tearDown(self):
+        self.popup_loader_patcher.stop()
         clear_place_recommendation_cache()
 
     @patch(

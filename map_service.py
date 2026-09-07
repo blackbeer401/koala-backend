@@ -205,6 +205,39 @@ def search_places_by_category(
         []
     )
 
+
+def search_places_by_keyword(
+    latitude: float,
+    longitude: float,
+    query: str,
+    radius: int = 2000,
+    size: int = 15,
+):
+    """특정 좌표 주변의 장소를 키워드와 거리순으로 조회한다."""
+
+    url = (
+        "https://dapi.kakao.com/"
+        "v2/local/search/keyword.json"
+    )
+
+    response = requests.get(
+        url,
+        headers=kakao_headers(),
+        params={
+            "query": query,
+            "x": longitude,
+            "y": latitude,
+            "radius": radius,
+            "size": size,
+            "sort": "distance",
+        },
+        timeout=10,
+    )
+
+    response.raise_for_status()
+
+    return response.json().get("documents", [])
+
 # 5. 좌표 → 행정구역 변환
 def get_region_from_coordinates(
     latitude: float,

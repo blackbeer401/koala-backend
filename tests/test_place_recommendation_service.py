@@ -13,6 +13,7 @@ from place_recommendation_cache import (
 )
 from place_recommendation_service import (
     SUPPORTED_PLACE_ACTIVITIES,
+    filter_walk_kakao_places,
     finalize_recommended_places,
     recommend_places,
     resolve_place_activities,
@@ -101,8 +102,47 @@ class ActivityPolicyTests(unittest.TestCase):
             ["카페 1", "카페 2"],
         )
 
-    def test_unsupported_activity_is_not_given_fake_mapping(self):
-        self.assertEqual(resolve_place_activities(["walk", "drink"]), [])
+    def test_walk_and_drink_are_supported(self):
+        self.assertEqual(
+            resolve_place_activities(["walk", "drink"]),
+            ["walk", "drink"],
+        )
+
+    def test_walk_prefers_primary_categories(self):
+        places = [
+            {"place_name": "산책로", "category_name": "여행 > 관광,명소 > 도보여행"},
+            {"place_name": "전망대", "category_name": "여행 > 관광,명소 > 전망대"},
+        ]
+
+        self.assertEqual(
+            [place["place_name"] for place in filter_walk_kakao_places(places)],
+            ["산책로"],
+        )
+
+    def test_walk_uses_secondary_categories_only_without_primary(self):
+        places = [
+            {"place_name": "테마거리", "category_name": "여행 > 관광,명소 > 테마거리"},
+            {"place_name": "먹자골목", "category_name": "여행 > 관광,명소 > 테마거리 > 먹자골목"},
+        ]
+
+        self.assertEqual(
+            [place["place_name"] for place in filter_walk_kakao_places(places)],
+            ["테마거리"],
+        )
+
+    def test_walk_returns_empty_when_no_allowed_category_exists(self):
+        places = [
+            {
+                "place_name": "눈썰매장",
+                "category_name": "스포츠,레저 > 스포츠시설 > 눈썰매장",
+            },
+            {
+                "place_name": "문화유산",
+                "category_name": "여행 > 관광,명소 > 문화유산",
+            },
+        ]
+
+        self.assertEqual(filter_walk_kakao_places(places), [])
 
     def test_distance_based_score_is_unchanged(self):
         result = finalize_recommended_places(
@@ -259,10 +299,15 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
         "place_recommendation_service.get_nearby_current_exhibitions",
         return_value=[],
     )
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        return_value=make_kakao_places(2, prefix="술집"),
+    )
     @patch("place_recommendation_service.search_places_by_category")
     def test_empty_activities_collect_all_supported_kakao_categories(
         self,
         mock_search_places,
+        mock_search_keyword,
         mock_get_exhibitions,
         mock_get_region,
     ):
@@ -270,13 +315,20 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
             "FD6": "음식",
             "CE7": "카페",
             "CT1": "문화",
+            "AT4": "산책",
         }
 
         def search_side_effect(**kwargs):
-            return make_kakao_places(
+            places = make_kakao_places(
                 2,
                 prefix=category_prefixes[kwargs["category_code"]],
             )
+
+            if kwargs["category_code"] == "AT4":
+                for place in places:
+                    place["category_name"] = "여행 > 관광,명소 > 도보여행"
+
+            return places
 
         mock_search_places.side_effect = search_side_effect
         ranked_places = recommend_places(
@@ -290,12 +342,95 @@ class NormalAndFallbackFlowTests(unittest.TestCase):
             space_preference=None,
         )
 
-        self.assertEqual(mock_search_places.call_count, 3)
+        self.assertEqual(mock_search_places.call_count, 4)
+        mock_search_keyword.assert_called_once_with(
+            latitude=37.5,
+            longitude=126.9,
+            query="술집",
+            radius=2000,
+            size=15,
+        )
         self.assertEqual(
             [place["category"] for place in ranked_places],
-            ["food", "cafe", "culture", "food", "cafe", "culture"],
+            [
+                "food", "cafe", "walk", "culture", "drink",
+                "food", "cafe", "walk", "culture", "drink",
+            ],
         )
         mock_get_region.assert_called_once()
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch("place_recommendation_service.search_places_by_keyword")
+    @patch("place_recommendation_service.search_places_by_category")
+    def test_walk_and_drink_join_existing_round_robin(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_region,
+    ):
+        walk_places = make_kakao_places(2, prefix="산책")
+        for place in walk_places:
+            place["category_name"] = "여행 > 관광,명소 > 숲"
+
+        mock_search_category.side_effect = lambda **kwargs: (
+            make_kakao_places(2, prefix="음식")
+            if kwargs["category_code"] == "FD6"
+            else walk_places
+        )
+        mock_search_keyword.return_value = make_kakao_places(2, prefix="술집")
+
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food", "walk", "drink"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            [place["category"] for place in ranked_places],
+            ["food", "walk", "drink", "food", "walk", "drink"],
+        )
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_keyword",
+        side_effect=RuntimeError("술집 검색 장애"),
+    )
+    @patch(
+        "place_recommendation_service.search_places_by_category",
+        return_value=make_kakao_places(1, prefix="음식"),
+    )
+    def test_drink_failure_keeps_other_activity_results(
+        self,
+        mock_search_category,
+        mock_search_keyword,
+        mock_get_region,
+    ):
+        ranked_places = recommend_places(
+            area_name="테스트 지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["food", "drink"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+        )
+
+        self.assertEqual(
+            [place["category"] for place in ranked_places],
+            ["food"],
+        )
 
     @patch(
         "place_recommendation_service.get_region_from_coordinates",

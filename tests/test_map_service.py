@@ -116,6 +116,32 @@ class TravelModeTests(unittest.TestCase):
 class ExternalMapApiTests(unittest.TestCase):
 
     @patch("map_service.requests.get")
+    def test_keyword_search_uses_nearby_distance_parameters(self, mock_get):
+        response = Mock()
+        response.json.return_value = {"documents": [{"place_name": "술집"}]}
+        mock_get.return_value = response
+
+        result = map_service.search_places_by_keyword(
+            latitude=37.5,
+            longitude=126.9,
+            query="술집",
+        )
+
+        self.assertEqual(result, [{"place_name": "술집"}])
+        self.assertEqual(
+            mock_get.call_args.kwargs["params"],
+            {
+                "query": "술집",
+                "x": 126.9,
+                "y": 37.5,
+                "radius": 2000,
+                "size": 15,
+                "sort": "distance",
+            },
+        )
+        self.assertEqual(mock_get.call_args.kwargs["timeout"], 10)
+
+    @patch("map_service.requests.get")
     def test_driving_response_is_normalized(self, mock_get):
         response = Mock()
         response.json.return_value = {

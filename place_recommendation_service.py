@@ -1,6 +1,7 @@
 from map_service import (
     get_region_from_coordinates,
     search_places_by_category,
+    search_places_by_keyword,
 )
 
 from tour_service import (
@@ -24,7 +25,31 @@ KAKAO_ACTIVITY_CATEGORY_CODES = {
     "food": "FD6",
     "cafe": "CE7",
     "culture": "CT1",
+    "walk": "AT4",
 }
+
+WALK_PRIMARY_CATEGORY_KEYWORDS = (
+    "도보여행",
+    "둘레길",
+    "숲",
+    "수목원",
+    "식물원",
+    "산",
+    "강",
+    "호수",
+    "저수지",
+)
+WALK_SECONDARY_CATEGORY_KEYWORDS = (
+    "테마거리",
+    "전망대",
+)
+WALK_EXCLUDED_CATEGORY_KEYWORDS = (
+    "먹자골목",
+    "카페거리",
+    "스포츠시설",
+    "눈썰매장",
+    "섬",
+)
 
 # TourAPI 관광지 중분류 → 우리 서비스 활동 카테고리
 TOUR_ACTIVITY_CATEGORY_MAP = {
@@ -38,10 +63,54 @@ TOUR_ACTIVITY_CATEGORY_MAP = {
 SUPPORTED_PLACE_ACTIVITIES = [
     "food",
     "cafe",
+    "walk",
     "culture",
     "entertainment",
     "shopping",
+    "drink",
 ]
+
+
+def filter_walk_kakao_places(places: list[dict]):
+    """AT4 후보에서 산책에 맞는 장소만 단계적으로 남긴다."""
+
+    def has_category(place, keywords):
+        category_tokens = {
+            token.strip()
+            for part in (place.get("category_name") or "").split(">")
+            for token in part.split(",")
+        }
+        return not category_tokens.isdisjoint(keywords)
+
+    eligible_places = [
+        place
+        for place in places
+        if not has_category(
+            place,
+            WALK_EXCLUDED_CATEGORY_KEYWORDS,
+        )
+    ]
+
+    primary_places = [
+        place
+        for place in eligible_places
+        if has_category(
+            place,
+            WALK_PRIMARY_CATEGORY_KEYWORDS,
+        )
+    ]
+
+    if primary_places:
+        return primary_places
+
+    return [
+        place
+        for place in eligible_places
+        if has_category(
+            place,
+            WALK_SECONDARY_CATEGORY_KEYWORDS,
+        )
+    ]
 
 def normalize_place_name(name: str | None):
     """
@@ -362,21 +431,35 @@ def recommend_places(
     normalized_kakao_places = []
 
     for activity in active_activities:
-        category_code = KAKAO_ACTIVITY_CATEGORY_CODES.get(
-            activity
-        )
-
-        if category_code is None:
-            continue
-
         try:
-            kakao_places = search_places_by_category(
-                latitude=latitude,
-                longitude=longitude,
-                category_code=category_code,
-                radius=2000,
-                size=15,
-            )
+            if activity == "drink":
+                kakao_places = search_places_by_keyword(
+                    latitude=latitude,
+                    longitude=longitude,
+                    query="술집",
+                    radius=2000,
+                    size=15,
+                )
+            else:
+                category_code = KAKAO_ACTIVITY_CATEGORY_CODES.get(
+                    activity
+                )
+
+                if category_code is None:
+                    continue
+
+                kakao_places = search_places_by_category(
+                    latitude=latitude,
+                    longitude=longitude,
+                    category_code=category_code,
+                    radius=2000,
+                    size=15,
+                )
+
+                if activity == "walk":
+                    kakao_places = filter_walk_kakao_places(
+                        kakao_places
+                    )
 
         except Exception:
             # 특정 Kakao 카테고리 조회에 실패하더라도

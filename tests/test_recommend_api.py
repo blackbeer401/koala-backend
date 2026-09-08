@@ -91,6 +91,7 @@ class RecommendAPITests(unittest.TestCase):
             set(body),
             {
                 "recommendation_message",
+                "recommendation_context",
                 "target_area",
                 "current_area",
                 "other_areas",
@@ -98,6 +99,17 @@ class RecommendAPITests(unittest.TestCase):
             },
         )
         self.assertEqual(body["recommendation_message"], "추천 설명")
+        self.assertEqual(
+            body["recommendation_context"],
+            {
+                "activities": ["cafe"],
+                "transport_mode": "auto",
+            },
+        )
+        self.assertNotIn("companions", body["recommendation_context"])
+        self.assertNotIn("space_preference", body["recommendation_context"])
+        self.assertNotIn("budget_max", body["recommendation_context"])
+        self.assertNotIn("budget_preference", body["recommendation_context"])
         self.assertIsNone(body["target_area"])
         self.assertIsNone(body["current_area"])
         self.assertEqual(len(body["other_areas"]), 3)
@@ -146,6 +158,13 @@ class RecommendAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["target_area"]["AREA_CD"], "B")
+        self.assertEqual(
+            body["recommendation_context"],
+            {
+                "activities": ["cafe"],
+                "transport_mode": "public_transit",
+            },
+        )
         self.assertIsNone(body["current_area"])
         self.assertEqual(body["other_areas"], [])
         self.assertEqual(mock_search_location.call_count, 3)
@@ -153,6 +172,43 @@ class RecommendAPITests(unittest.TestCase):
             call.kwargs["transport_mode"] == "public_transit"
             for call in mock_get_travel.call_args_list
         ))
+
+    @patch("main.generate_recommendation_message", return_value="추천 설명")
+    @patch("main.get_congestion_data", return_value=None)
+    @patch("main.get_travel", return_value={"duration_min": 20})
+    @patch("main.load_poi_activity_scores")
+    @patch("main.load_poi_candidates")
+    @patch("main.parse_user_intent")
+    def test_empty_activities_are_preserved_in_recommendation_context(
+        self,
+        mock_parse,
+        mock_load_candidates,
+        mock_load_scores,
+        mock_get_travel,
+        mock_get_congestion,
+        mock_generate_message,
+    ):
+        mock_parse.return_value = intent(activities=[])
+        mock_load_candidates.return_value = self.candidates
+        mock_load_scores.return_value = activity_scores(self.candidates)
+
+        response = self.client.post(
+            "/recommend",
+            json={
+                "user_message": "근처 추천해줘",
+                "gps_latitude": 37.4765,
+                "gps_longitude": 126.9816,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["recommendation_context"],
+            {
+                "activities": [],
+                "transport_mode": "auto",
+            },
+        )
 
     @patch("main.generate_recommendation_message", return_value="일부 후보 추천")
     @patch("main.get_congestion_data", return_value=None)

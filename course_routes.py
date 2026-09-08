@@ -1,7 +1,11 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, HTTPException
 
+from activity_duration_policy import determine_stay_duration
 from course_order_optimizer import optimize_course_order
 from models import CourseCalculationRequest
+from place_availability import evaluate_place_availability
 
 
 router = APIRouter()
@@ -29,6 +33,32 @@ def calculate_course(
             ),
             transport_mode=request.transport_mode,
         )
+
+        if request.departure_datetime is not None:
+            cursor = request.departure_datetime
+            places_with_availability = []
+
+            for index, place in enumerate(course_result["optimized_places"]):
+                travel_minutes = course_result["legs"][index][
+                    "travel_time_minutes"
+                ]
+                availability = evaluate_place_availability(
+                    place,
+                    cursor,
+                    travel_minutes,
+                )
+                places_with_availability.append({
+                    **place,
+                    "availability": availability,
+                })
+                cursor = availability["arrival_at"] + timedelta(
+                    minutes=determine_stay_duration(
+                        place["activity"],
+                        place.get("specified_duration_minutes"),
+                    )
+                )
+
+            course_result["optimized_places"] = places_with_availability
 
         cleaned_optimized_places = []
 

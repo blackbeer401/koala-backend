@@ -354,6 +354,7 @@ class CourseCalculationRequest(BaseModel):
         max_length=6,
     )
     available_time_minutes: int = Field(gt=0)
+    departure_datetime: datetime | None = None
     end_location: CourseLocationRequest | None = None
     transport_mode: Literal[
         "auto",
@@ -361,6 +362,16 @@ class CourseCalculationRequest(BaseModel):
         "walk",
         "car",
     ] = "auto"
+
+    @field_validator("departure_datetime")
+    @classmethod
+    def validate_departure_datetime(cls, value):
+        if value is not None and value.utcoffset() is None:
+            raise ValueError(
+                "departure_datetime은 timezone-aware datetime이어야 합니다."
+            )
+
+        return value
 
     @model_validator(mode="after")
     def validate_preferred_first_count(self):

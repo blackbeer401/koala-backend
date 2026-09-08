@@ -1,3 +1,6 @@
+import logging
+from time import perf_counter
+
 from fastapi import FastAPI
 from auth_routes import router as auth_router
 from course_routes import (
@@ -54,6 +57,9 @@ from stay_time_validation import (
 from course_order_optimizer import optimize_course_order
 
 
+performance_logger = logging.getLogger("uvicorn.error")
+
+
 # 1. FastAPI 앱 생성
 app = FastAPI()
 app.include_router(auth_router)
@@ -84,17 +90,83 @@ def test_poi():
 def recommend(request: RecommendRequest):
     """기존 직접 호출 테스트를 위한 호환 함수."""
 
-    return recommend_regions(
-        request,
-        parse_user_intent_fn=parse_user_intent,
-        generate_recommendation_message_fn=generate_recommendation_message,
-        search_location_fn=search_location,
-        get_travel_fn=get_travel,
-        load_poi_candidates_fn=load_poi_candidates,
-        load_poi_activity_scores_fn=load_poi_activity_scores,
-        get_congestion_data_fn=get_congestion_data,
-        find_proactive_suggestion_fn=find_proactive_suggestion,
-    )
+    metrics = {
+        name: {"seconds": 0.0, "calls": 0}
+        for name in (
+            "intent_llm",
+            "proactive",
+            "proactive_travel",
+            "region_travel",
+            "congestion",
+            "message_llm",
+            "activity_score",
+            "poi_load",
+        )
+    }
+
+    def measured(name, function):
+        def call(*args, **kwargs):
+            started = perf_counter()
+            try:
+                return function(*args, **kwargs)
+            finally:
+                metrics[name]["seconds"] += perf_counter() - started
+                metrics[name]["calls"] += 1
+
+        return call
+
+    measured_proactive_travel = measured("proactive_travel", get_travel)
+
+    def measured_proactive(**kwargs):
+        return find_proactive_suggestion(
+            **kwargs,
+            get_travel_fn=measured_proactive_travel,
+        )
+
+    total_started = perf_counter()
+    try:
+        return recommend_regions(
+            request,
+            parse_user_intent_fn=measured("intent_llm", parse_user_intent),
+            generate_recommendation_message_fn=measured(
+                "message_llm",
+                generate_recommendation_message,
+            ),
+            search_location_fn=search_location,
+            get_travel_fn=measured("region_travel", get_travel),
+            load_poi_candidates_fn=measured("poi_load", load_poi_candidates),
+            load_poi_activity_scores_fn=measured(
+                "activity_score",
+                load_poi_activity_scores,
+            ),
+            get_congestion_data_fn=measured(
+                "congestion",
+                get_congestion_data,
+            ),
+            find_proactive_suggestion_fn=measured(
+                "proactive",
+                measured_proactive,
+            ),
+        )
+    finally:
+        performance_logger.info(
+            "[PERFORMANCE] total=%.4fs intent_llm=%.4fs "
+            "proactive=%.4fs proactive_travel=%.4fs calls=%d "
+            "region_travel=%.4fs calls=%d congestion=%.4fs calls=%d "
+            "message_llm=%.4fs activity_score=%.4fs poi_load=%.4fs",
+            perf_counter() - total_started,
+            metrics["intent_llm"]["seconds"],
+            metrics["proactive"]["seconds"],
+            metrics["proactive_travel"]["seconds"],
+            metrics["proactive_travel"]["calls"],
+            metrics["region_travel"]["seconds"],
+            metrics["region_travel"]["calls"],
+            metrics["congestion"]["seconds"],
+            metrics["congestion"]["calls"],
+            metrics["message_llm"]["seconds"],
+            metrics["activity_score"]["seconds"],
+            metrics["poi_load"]["seconds"],
+        )
 
 
 app.include_router(create_region_router(recommend))

@@ -367,6 +367,61 @@ class RecommendAPITests(unittest.TestCase):
         )
         mock_generate_message.assert_not_called()
 
+    def test_performance_metrics_do_not_change_result_or_api_calls(self):
+        expected_candidates = self.candidates
+        expected_scores = activity_scores(expected_candidates)
+
+        def proactive(**kwargs):
+            travel = kwargs["get_travel_fn"]
+            travel(127.0, 37.5, 127.01, 37.51, transport_mode="auto")
+            travel(127.0, 37.5, 127.02, 37.52, transport_mode="auto")
+            return None
+
+        self.mock_proactive.side_effect = proactive
+
+        with (
+            patch("main.parse_user_intent", return_value=intent()),
+            patch("main.load_poi_candidates", return_value=expected_candidates),
+            patch("main.load_poi_activity_scores", return_value=expected_scores),
+            patch(
+                "main.get_travel",
+                return_value={"mode": "transit", "duration_min": 20},
+            ) as mock_get_travel,
+            patch("main.get_congestion_data", return_value=None) as mock_congestion,
+            patch(
+                "main.generate_recommendation_message",
+                return_value="추천 설명",
+            ),
+            self.assertLogs("uvicorn.error", level="INFO") as captured_logs,
+        ):
+            response = self.client.post(
+                "/recommend",
+                json={
+                    "user_message": "근처 카페 추천해줘",
+                    "gps_latitude": 37.4765,
+                    "gps_longitude": 126.9816,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["recommendation_message"], "추천 설명")
+        self.assertEqual(
+            [place["AREA_CD"] for place in response.json()["other_areas"]],
+            ["C", "B", "A"],
+        )
+        self.assertNotIn("performance", response.json())
+        self.assertEqual(mock_get_travel.call_count, 5)
+        self.assertEqual(mock_congestion.call_count, 3)
+
+        performance_log = "\n".join(captured_logs.output)
+        self.assertIn("[PERFORMANCE]", performance_log)
+        self.assertIn("proactive_travel=", performance_log)
+        self.assertIn("proactive_travel=0.", performance_log)
+        self.assertIn("region_travel=", performance_log)
+        self.assertIn("congestion=", performance_log)
+        self.assertIn("calls=2", performance_log)
+        self.assertIn("calls=3", performance_log)
+
 
 if __name__ == "__main__":
     unittest.main()

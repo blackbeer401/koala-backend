@@ -1,5 +1,4 @@
 from datetime import datetime
-from time import perf_counter
 
 from models import RecommendRequest, StructuredConditions
 from conditions import (
@@ -43,16 +42,9 @@ def recommend_regions(
 
     current_datetime = datetime.now().astimezone().isoformat()
 
-    llm_start = perf_counter()
-
     intent = parse_user_intent_fn(
         user_input=request.user_message,
         current_datetime=current_datetime
-    )
-
-    print(
-        f"[PERFORMANCE] LLM 입력 분석: "
-        f"{perf_counter() - llm_start:.2f}초"
     )
 
     conditions = StructuredConditions(**intent)
@@ -598,7 +590,6 @@ def recommend_regions(
 
     # 상위 후보의 실제 대중교통 이동시간을 확인한다.
 
-    travel_api_start = perf_counter()
     valid_api_candidates = []
 
     for candidate in api_candidates:
@@ -724,11 +715,6 @@ def recommend_regions(
         )
 
         valid_api_candidates.append(candidate)
-    print(
-        f"[PERFORMANCE] 이동시간 API 전체: "
-        f"{perf_counter() - travel_api_start:.2f}초"
-    )
-
     api_candidates = valid_api_candidates
     recommended_candidates = []
     extended_candidates = []
@@ -822,16 +808,9 @@ def recommend_regions(
             "extended_areas": extended_candidates,
         }
 
-    message_start = perf_counter()
-
     recommendation_message = generate_recommendation_message_fn(
         user_message=request.user_message,
         recommendation_result=recommendation_result
-    )
-
-    print(
-        f"[PERFORMANCE] LLM 추천 설명 생성: "
-        f"{perf_counter() - message_start:.2f}초"
     )
 
     return {

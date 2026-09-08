@@ -35,28 +35,47 @@ def _duration_minutes(travel):
     return duration if duration >= 0 else None
 
 
-def _message(place, days_left, travel_minutes, visitable_minutes, departure_datetime):
+def _message(
+    place,
+    days_left,
+    travel_mode,
+    travel_minutes,
+    visitable_minutes,
+    departure_datetime,
+):
     name = place["name"]
     now = datetime.now(SEOUL_TIMEZONE)
     future_departure = departure_datetime > now
-    departure_text = departure_datetime.strftime("%H시 %M분에 출발하면")
+    departure_time = departure_datetime.strftime("%H시 %M분")
+    mode_text = {
+        "walk": "도보로",
+        "transit": "대중교통으로",
+        "car": "차량으로",
+    }.get(travel_mode)
+    travel_text = (
+        f"{mode_text} 약 {travel_minutes}분"
+        if mode_text
+        else f"약 {travel_minutes}분"
+    )
 
     if days_left == 0:
-        timing = departure_text if future_departure else "지금 출발하면"
-        return (
-            f"오늘이 마지막 날인 {name}이(가) {travel_minutes}분 거리에 있어요. "
-            f"{timing} 약 {visitable_minutes}분 둘러볼 수 있는데 확인해 보실래요?"
+        ending_text = "오늘이 마지막 날이에요."
+    else:
+        ending_text = f"{days_left}일 뒤 종료돼요."
+
+    if future_departure:
+        visit_text = (
+            f"{departure_time}에 출발하면 {travel_text}이고, "
+            f"도착 후 약 {visitable_minutes}분 둘러볼 수 있어요."
+        )
+    else:
+        visit_text = (
+            f"현재 위치에서 {travel_text}이고, "
+            f"{'지금 출발하면' if days_left == 0 else '지금 방문하면'} "
+            f"약 {visitable_minutes}분 둘러볼 수 있어요."
         )
 
-    timing = (
-        f"{departure_text} 들러볼 수 있는데"
-        if future_departure
-        else "지금 들러볼 수 있는데"
-    )
-    return (
-        f"{days_left}일 뒤 종료되는 {name}이(가) {travel_minutes}분 거리에 있어요. "
-        f"{timing} 확인해 보실래요?"
-    )
+    return f"'{name}', {ending_text} {visit_text} 확인해 보실래요?"
 
 
 def find_proactive_suggestion(
@@ -190,6 +209,11 @@ def find_proactive_suggestion(
                         "latitude",
                         "longitude",
                         "category",
+                        "start_at",
+                        "end_at",
+                        "image_url",
+                        "detail_url",
+                        "official_url",
                     )
                 },
                 "reason": "ending_today" if days_left == 0 else "ending_soon",
@@ -203,6 +227,7 @@ def find_proactive_suggestion(
                 "message": _message(
                     place,
                     days_left,
+                    travel.get("mode"),
                     travel_minutes,
                     visitable_minutes,
                     departure_datetime,

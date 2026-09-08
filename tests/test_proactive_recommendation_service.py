@@ -61,6 +61,68 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
         self.assertEqual(today["reason"], "ending_today")
         self.assertEqual(soon["reason"], "ending_soon")
 
+    def test_popup_place_includes_card_fields_and_null_urls(self):
+        result = self.find([self.place(image_url="https://example.com/image.jpg")])
+
+        self.assertEqual(
+            set(result["place"]),
+            {
+                "source",
+                "source_id",
+                "name",
+                "latitude",
+                "longitude",
+                "category",
+                "start_at",
+                "end_at",
+                "image_url",
+                "detail_url",
+                "official_url",
+            },
+        )
+        self.assertEqual(result["place"]["start_at"], "2026-09-01")
+        self.assertEqual(result["place"]["end_at"], "2026-09-08")
+        self.assertEqual(
+            result["place"]["image_url"],
+            "https://example.com/image.jpg",
+        )
+        self.assertIsNone(result["place"]["detail_url"])
+        self.assertIsNone(result["place"]["official_url"])
+
+    def test_seoul_culture_place_uses_same_card_structure(self):
+        culture_place = self.place(
+            source="seoul_culture",
+            detail_url="https://example.com/detail",
+            official_url="https://example.com/official",
+        )
+        result = self.find(
+            [],
+            load_culture_places_fn=Mock(return_value=[culture_place]),
+        )
+
+        self.assertEqual(
+            set(result["place"]),
+            {
+                "source",
+                "source_id",
+                "name",
+                "latitude",
+                "longitude",
+                "category",
+                "start_at",
+                "end_at",
+                "image_url",
+                "detail_url",
+                "official_url",
+            },
+        )
+        self.assertEqual(result["place"]["source"], "seoul_culture")
+        self.assertIsNone(result["place"]["image_url"])
+        self.assertEqual(
+            result["place"]["detail_url"],
+            "https://example.com/detail",
+        )
+
     def test_missing_or_distant_end_date_is_excluded(self):
         self.assertIsNone(self.find([self.place(days_left=4)]))
         self.assertIsNone(self.find([self.place(end_at=None)]))
@@ -166,6 +228,52 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
         )
 
         self.assertNotIn("지금 출발하면", result["message"])
+
+    def test_message_templates_and_travel_modes(self):
+        current_cases = [
+            (0, "walk", "오늘이 마지막 날이에요", "도보로", "지금 출발하면"),
+            (2, "transit", "2일 뒤 종료돼요", "대중교통으로", "지금 방문하면"),
+        ]
+
+        for days_left, mode, ending, mode_text, timing in current_cases:
+            with self.subTest(days_left=days_left, mode=mode):
+                result = self.find(
+                    [self.place(days_left=days_left)],
+                    get_travel_fn=Mock(
+                        return_value={"mode": mode, "duration_min": 10}
+                    ),
+                )
+                message = result["message"]
+                self.assertIn("'행사',", message)
+                self.assertIn(ending, message)
+                self.assertIn(mode_text, message)
+                self.assertIn(timing, message)
+                self.assertIn("약 120분 둘러볼 수 있어요", message)
+                self.assertNotIn("이(가)", message)
+
+        future = datetime.now(SEOUL_TIMEZONE) + timedelta(hours=2)
+        for days_left, mode, mode_text in (
+            (0, "car", "차량으로"),
+            (2, "unknown", "약 10분"),
+        ):
+            with self.subTest(future=True, days_left=days_left, mode=mode):
+                result = self.find(
+                    [self.place(
+                        days_left=days_left,
+                        start_at=future.date().isoformat(),
+                        end_at=(future.date() + timedelta(days=days_left)).isoformat(),
+                    )],
+                    departure_datetime=future,
+                    get_travel_fn=Mock(
+                        return_value={"mode": mode, "duration_min": 10}
+                    ),
+                )
+                message = result["message"]
+                self.assertIn(mode_text, message)
+                self.assertIn("도착 후 약 120분 둘러볼 수 있어요", message)
+                self.assertNotIn("지금", message)
+                self.assertNotIn("현재", message)
+                self.assertNotIn("이(가)", message)
 
 
 if __name__ == "__main__":

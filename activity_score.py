@@ -1,3 +1,6 @@
+from functools import lru_cache
+from pathlib import Path
+
 import pandas as pd
 
 
@@ -418,18 +421,11 @@ def add_category_activity_scores(score_df):
     return result_df
 
 
-def load_poi_activity_scores(
-    store_file="data/서울시 상권분석서비스(점포-행정동)_2025년.csv",
-    mapping_file="data/poi121_매핑결과.csv"
+@lru_cache(maxsize=4)
+def _load_poi_activity_scores_cached(
+    store_file: str,
+    mapping_file: str,
 ):
-    """
-    점포 데이터와 POI-행정동 매핑 데이터를 이용해
-    121개 POI의 활동 적합도 점수를 생성한다.
-
-    main.py 등 다른 파일에서는 이 함수 하나만 호출하면
-    food / cafe / drink / entertainment 점수를 사용할 수 있다.
-    """
-
     # 점포 데이터 로드
     store_df = load_store_data(store_file)
 
@@ -468,6 +464,25 @@ def load_poi_activity_scores(
     )
 
     return poi_score_df
+
+
+def load_poi_activity_scores(
+    store_file="data/서울시 상권분석서비스(점포-행정동)_2025년.csv",
+    mapping_file="data/poi121_매핑결과.csv"
+):
+    """
+    점포 데이터와 POI-행정동 매핑 데이터를 이용해
+    121개 POI의 활동 적합도 점수를 생성한다.
+
+    main.py 등 다른 파일에서는 이 함수 하나만 호출하면
+    food / cafe / drink / entertainment 점수를 사용할 수 있다.
+    """
+
+    cached_scores = _load_poi_activity_scores_cached(
+        str(Path(store_file).resolve()),
+        str(Path(mapping_file).resolve()),
+    )
+    return cached_scores.copy(deep=True)
 # 테스트 실행
 # activity_score.py를 직접 실행했을 때만 아래 코드가 실행된다.
 # 다른 파일에서 import할 때는 실행되지 않는다.

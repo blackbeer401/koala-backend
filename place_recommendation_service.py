@@ -27,7 +27,7 @@ from seoul_culture_service import (
 )
 from popup_service import PopupDataError, load_popup_places
 
-POPUP_DATA_PATH = Path(__file__).resolve().parent / "data" / "20260904_popup_places.json"
+POPUP_DATA_PATH = Path(__file__).resolve().parent / "data" / "20260908_popup_places.json"
 POPUP_MAX_DISTANCE_M = 2000
 POPUP_ACTIVITIES = frozenset({
     "shopping", "entertainment", "food", "cafe", "culture",

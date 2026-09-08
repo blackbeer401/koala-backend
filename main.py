@@ -16,6 +16,7 @@ from region_routes import (
 
 from place_recommendation_service import recommend_places
 from region_recommendation_service import recommend_regions
+from proactive_recommendation_service import find_proactive_suggestion
 from place_recommendation_cache import (
     create_place_recommendation_page,
     get_next_place_recommendation_page,
@@ -92,6 +93,7 @@ def recommend(request: RecommendRequest):
         load_poi_candidates_fn=load_poi_candidates,
         load_poi_activity_scores_fn=load_poi_activity_scores,
         get_congestion_data_fn=get_congestion_data,
+        find_proactive_suggestion_fn=find_proactive_suggestion,
     )
 
 

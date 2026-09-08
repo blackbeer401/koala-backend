@@ -50,12 +50,46 @@ def activity_scores(candidates):
 
 class RecommendAPITests(unittest.TestCase):
     def setUp(self):
+        self.proactive_patcher = patch(
+            "main.find_proactive_suggestion",
+            return_value=None,
+        )
+        self.mock_proactive = self.proactive_patcher.start()
+        self.addCleanup(self.proactive_patcher.stop)
         self.client = TestClient(app)
         self.candidates = [
             candidate("A", "지역 A", 37.50, 127.00),
             candidate("B", "지역 B", 37.51, 127.01),
             candidate("C", "지역 C", 37.52, 127.02),
         ]
+
+    def test_proactive_suggestion_is_added_without_replacing_region_result(self):
+        suggestion = {"reason": "ending_today", "place": {"name": "팝업"}}
+        self.mock_proactive.return_value = suggestion
+
+        with (
+            patch("main.parse_user_intent", return_value=intent()),
+            patch("main.load_poi_candidates", return_value=self.candidates),
+            patch(
+                "main.load_poi_activity_scores",
+                return_value=activity_scores(self.candidates),
+            ),
+            patch("main.get_travel", return_value={"duration_min": 20}),
+            patch("main.get_congestion_data", return_value=None),
+            patch("main.generate_recommendation_message", return_value="추천 설명"),
+        ):
+            response = self.client.post(
+                "/recommend",
+                json={
+                    "user_message": "근처 카페 추천해줘",
+                    "gps_latitude": 37.4765,
+                    "gps_longitude": 126.9816,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["proactive_suggestion"], suggestion)
+        self.assertEqual(len(response.json()["other_areas"]), 3)
 
     @patch("main.generate_recommendation_message", return_value="추천 설명")
     @patch("main.get_congestion_data", return_value=None)
@@ -91,6 +125,7 @@ class RecommendAPITests(unittest.TestCase):
             set(body),
             {
                 "recommendation_message",
+                "proactive_suggestion",
                 "recommendation_context",
                 "target_area",
                 "current_area",
@@ -99,6 +134,7 @@ class RecommendAPITests(unittest.TestCase):
             },
         )
         self.assertEqual(body["recommendation_message"], "추천 설명")
+        self.assertIsNone(body["proactive_suggestion"])
         self.assertEqual(
             body["recommendation_context"],
             {

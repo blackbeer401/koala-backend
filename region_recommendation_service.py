@@ -38,6 +38,7 @@ def recommend_regions(
     load_poi_candidates_fn,
     load_poi_activity_scores_fn,
     get_congestion_data_fn,
+    find_proactive_suggestion_fn,
 ):
 
     current_datetime = datetime.now().astimezone().isoformat()
@@ -172,6 +173,17 @@ def recommend_regions(
             }
     else:
         end_location = None
+
+    try:
+        proactive_suggestion = find_proactive_suggestion_fn(
+            start_location=start_location,
+            departure_datetime=resolved_datetimes["start_datetime"],
+            end_location=end_location,
+            end_datetime=resolved_datetimes["end_datetime"],
+            transport_mode=conditions.transport_mode,
+        )
+    except Exception:
+        proactive_suggestion = None
 
     # 사용자가 활동할 목적 지역을 지정한 경우
     # target 주변의 여러 POI를 1차 후보로 가져온다.
@@ -823,6 +835,7 @@ def recommend_regions(
 
     return {
         "recommendation_message": recommendation_message,
+        "proactive_suggestion": proactive_suggestion,
         "recommendation_context": {
             "activities": conditions.activities,
             "transport_mode": conditions.transport_mode,

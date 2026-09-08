@@ -78,6 +78,8 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
                 "image_url",
                 "detail_url",
                 "official_url",
+                "operation_schedule",
+                "operation_schedule_status",
             },
         )
         self.assertEqual(result["place"]["start_at"], "2026-09-01")
@@ -88,6 +90,11 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
         )
         self.assertIsNone(result["place"]["detail_url"])
         self.assertIsNone(result["place"]["official_url"])
+        self.assertEqual(result["place"]["operation_schedule"], [{}])
+        self.assertEqual(
+            result["place"]["operation_schedule_status"],
+            "parsed",
+        )
 
     def test_seoul_culture_place_uses_same_card_structure(self):
         culture_place = self.place(
@@ -114,6 +121,8 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
                 "image_url",
                 "detail_url",
                 "official_url",
+                "operation_schedule",
+                "operation_schedule_status",
             },
         )
         self.assertEqual(result["place"]["source"], "seoul_culture")
@@ -121,6 +130,11 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
         self.assertEqual(
             result["place"]["detail_url"],
             "https://example.com/detail",
+        )
+        self.assertEqual(result["place"]["operation_schedule"], [{}])
+        self.assertEqual(
+            result["place"]["operation_schedule_status"],
+            "parsed",
         )
 
     def test_missing_or_distant_end_date_is_excluded(self):

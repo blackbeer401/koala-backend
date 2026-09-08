@@ -214,6 +214,8 @@ def find_proactive_suggestion(
                         "image_url",
                         "detail_url",
                         "official_url",
+                        "operation_schedule",
+                        "operation_schedule_status",
                     )
                 },
                 "reason": "ending_today" if days_left == 0 else "ending_soon",

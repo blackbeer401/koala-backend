@@ -95,6 +95,52 @@ class CourseApiTest(unittest.TestCase):
 
         self.assertIsNotNone(request.departure_datetime.utcoffset())
 
+    @patch("main.optimize_course_order")
+    def test_recalculates_proactive_place_availability_from_preserved_schedule(
+        self,
+        mock_optimize,
+    ):
+        departure = datetime(2026, 9, 8, 9, tzinfo=timezone.utc)
+        proactive_place = place(
+            "행사",
+            127.1,
+            source="popup",
+            source_id="popup-1",
+            start_at="2026-09-01",
+            end_at="2026-09-30",
+            operation_schedule_status="parsed",
+            operation_schedule=[{
+                "days": ["TUE"],
+                "opening_time": "10:00",
+                "closing_time": "20:00",
+                "closed": False,
+                "closes_next_day": False,
+            }],
+        )
+
+        def optimize(**kwargs):
+            return {
+                **course_result(),
+                "optimized_places": kwargs["selected_places"],
+                "legs": [{"travel_time_minutes": 10}],
+            }
+
+        mock_optimize.side_effect = optimize
+        result = calculate_course(
+            course_request(
+                [proactive_place],
+                departure_datetime=departure,
+            )
+        )
+
+        optimized_place = result["optimized_places"][0]
+        self.assertEqual(optimized_place["operation_schedule_status"], "parsed")
+        self.assertEqual(
+            optimized_place["operation_schedule"],
+            proactive_place["operation_schedule"],
+        )
+        self.assertEqual(optimized_place["availability"]["status"], "open")
+
     def test_rejects_naive_departure_datetime_with_422(self):
         response = TestClient(app).post(
             "/recommend/course",

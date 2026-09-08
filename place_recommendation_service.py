@@ -18,6 +18,7 @@ from place_ranking import (
     add_place_ranking_scores,
     sort_places_by_score,
 )
+from place_space import classify_place_space
 from seoul_culture_service import (
     SEOUL_TIMEZONE,
     SeoulCultureAPIError,
@@ -443,8 +444,16 @@ def finalize_recommended_places(
         places
     )
 
+    classified_places = [
+        {
+            **place,
+            **classify_place_space(place),
+        }
+        for place in unique_places
+    ]
+
     scored_places = add_place_ranking_scores(
-        unique_places
+        classified_places
     )
 
     return order_places_by_activity_round_robin(

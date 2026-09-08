@@ -2,7 +2,6 @@ import json
 import sys
 from pathlib import Path
 
-from openai import OpenAI
 from dotenv import load_dotenv
 from models import StructuredConditions
 
@@ -17,10 +16,6 @@ try:
     from intent_parser import parse_intent
 finally:
     sys.path.remove(str(FREEZE_DIR))
-
-# LLM 담당자가 테스트한 모델
-MODEL = "gpt-5.6-terra"
-
 
 def parse_user_intent(
     user_input: str,
@@ -68,34 +63,49 @@ def generate_recommendation_message(
 ):
     """
     백엔드가 계산한 추천 결과를 이용해
-    사용자에게 보여줄 자연어 추천 문장을 생성한다.
+    사용자에게 보여줄 결정적인 추천 문장을 생성한다.
     """
+    del user_message
 
-    prompt = f"""
-너는 지역 추천 서비스의 최종 추천 결과를 사용자에게 설명하는 역할이다.
+    target_area = recommendation_result.get("target_area")
+    current_area = recommendation_result.get("current_area")
+    other_areas = recommendation_result.get("other_areas") or []
+    extended_areas = recommendation_result.get("extended_areas") or []
+    messages = []
 
-사용자가 입력한 내용:
-{user_message}
+    if target_area:
+        messages.append(
+            f"추천 목적 지역은 '{target_area['AREA_NM']}'이에요."
+        )
+    elif current_area:
+        messages.append(
+            f"현재 계신 지역인 '{current_area['AREA_NM']}'부터 확인해보세요."
+        )
+    elif other_areas:
+        messages.append(
+            f"가장 추천하는 지역은 '{other_areas[0]['AREA_NM']}'이에요."
+        )
+        other_areas = other_areas[1:]
+    elif extended_areas:
+        messages.append(
+            f"이동 범위를 넓힌 추천 지역은 '{extended_areas[0]['AREA_NM']}'이에요."
+        )
+        extended_areas = extended_areas[1:]
+    else:
+        return "현재 조건에서 추천 가능한 지역을 찾지 못했어요."
 
-백엔드가 계산한 추천 결과:
-{recommendation_result}
+    if other_areas:
+        names = ", ".join(
+            f"'{area['AREA_NM']}'" for area in other_areas
+        )
+        messages.append(f"다른 선택지로 {names}도 확인해볼 수 있어요.")
 
-규칙:
-- 추천 지역과 점수는 백엔드 계산 결과를 그대로 사용한다.
-- 새로운 지역을 임의로 추가하지 않는다.
-- 점수를 이용해 지역의 순위를 다시 계산하거나 변경하지 않는다.
-- current_area가 있으면 반드시 현재 지역을 가장 먼저 안내한다.
-- other_areas는 제공된 배열 순서대로 그다음 대안으로 안내한다.
-- extended_areas는 이동 부담이 큰 추가 선택지로만 안내한다.
-- current_area보다 other_areas의 점수가 높더라도 "가장 추천", "1순위" 등으로 표현하지 않는다.
-- 이동시간, 혼잡도, 활동 적합도 등 제공된 정보만 사용한다.
-- 사용자에게 자연스럽고 간결한 한국어로 설명한다.
-"""
-    
-    client = OpenAI()
-    response = client.responses.create(
-        model=MODEL,
-        input=prompt
-    )
+    if extended_areas:
+        names = ", ".join(
+            f"'{area['AREA_NM']}'" for area in extended_areas
+        )
+        messages.append(
+            f"이동 범위를 넓히면 {names}도 확인해볼 수 있어요."
+        )
 
-    return response.output_text
+    return " ".join(messages)

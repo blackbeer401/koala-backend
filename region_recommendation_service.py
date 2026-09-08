@@ -181,6 +181,7 @@ def recommend_regions(
             end_location=end_location,
             end_datetime=resolved_datetimes["end_datetime"],
             transport_mode=conditions.transport_mode,
+            activities=conditions.activities,
         )
     except Exception:
         proactive_suggestion = None

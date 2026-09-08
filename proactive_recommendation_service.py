@@ -15,6 +15,7 @@ from seoul_culture_service import (
 POPUP_DATA_PATH = Path(__file__).resolve().parent / "data" / "20260908_popup_places.json"
 MAX_DISTANCE_M = 2000
 MAX_TRAVEL_CANDIDATES = 3
+MAX_DETOUR_TRAVEL_MINUTES = 15
 ENDING_SOON_DAYS = 3
 
 
@@ -42,6 +43,7 @@ def _message(
     travel_minutes,
     visitable_minutes,
     departure_datetime,
+    suggestion_type,
 ):
     name = place["name"]
     now = datetime.now(SEOUL_TIMEZONE)
@@ -75,6 +77,12 @@ def _message(
             f"약 {visitable_minutes}분 둘러볼 수 있어요."
         )
 
+    if suggestion_type == "detour":
+        return (
+            f"오늘이 마지막 날인 '{name}'도 다른 선택지로 제안드려요. "
+            f"{visit_text} 확인해 보실래요?"
+        )
+
     return f"'{name}', {ending_text} {visit_text} 확인해 보실래요?"
 
 
@@ -84,6 +92,7 @@ def find_proactive_suggestion(
     end_location,
     end_datetime,
     transport_mode,
+    activities=None,
     *,
     load_popup_places_fn=load_popup_places,
     load_culture_places_fn=get_nearby_current_seoul_culture_places,
@@ -96,6 +105,7 @@ def find_proactive_suggestion(
     longitude = float(start_location["x"])
     departure_datetime = departure_datetime.astimezone(SEOUL_TIMEZONE)
     departure_date = departure_datetime.date()
+    requested_activities = set(activities or [])
     candidates = []
 
     try:
@@ -128,6 +138,22 @@ def find_proactive_suggestion(
         if not 0 <= days_left <= ENDING_SOON_DAYS:
             continue
 
+        activity_matches = (
+            not requested_activities
+            or place.get("category") in requested_activities
+        )
+        if not activity_matches and days_left > 0:
+            continue
+
+        suggestion_type = "timely" if activity_matches else "detour"
+        priority = (
+            0
+            if not requested_activities or activity_matches and days_left == 0
+            else 1
+            if suggestion_type == "detour"
+            else 2
+        )
+
         try:
             distance_m = calculate_distance_m(
                 latitude,
@@ -139,11 +165,15 @@ def find_proactive_suggestion(
             continue
 
         if distance_m <= MAX_DISTANCE_M:
-            candidates.append((days_left, distance_m, place))
+            candidates.append(
+                (priority, days_left, distance_m, suggestion_type, place)
+            )
 
-    candidates.sort(key=lambda item: (item[0], item[1]))
+    candidates.sort(key=lambda item: item[:3])
 
-    for days_left, _, place in candidates[:MAX_TRAVEL_CANDIDATES]:
+    for _, days_left, _, suggestion_type, place in candidates[
+        :MAX_TRAVEL_CANDIDATES
+    ]:
         try:
             travel = get_travel_fn(
                 longitude,
@@ -154,6 +184,11 @@ def find_proactive_suggestion(
             )
             travel_minutes = _duration_minutes(travel)
             if travel_minutes is None:
+                continue
+            if (
+                suggestion_type == "detour"
+                and travel_minutes > MAX_DETOUR_TRAVEL_MINUTES
+            ):
                 continue
 
             availability = evaluate_availability_fn(
@@ -174,17 +209,20 @@ def find_proactive_suggestion(
             fits_before_next_schedule = None
             visitable_minutes = remaining_minutes
 
-            if end_location is not None and end_datetime is not None:
-                onward = get_travel_fn(
-                    place["longitude"],
-                    place["latitude"],
-                    end_location["x"],
-                    end_location["y"],
-                    transport_mode=transport_mode,
-                )
-                onward_minutes = _duration_minutes(onward)
-                if onward_minutes is None:
-                    continue
+            if end_datetime is not None:
+                onward_minutes = 0
+
+                if end_location is not None:
+                    onward = get_travel_fn(
+                        place["longitude"],
+                        place["latitude"],
+                        end_location["x"],
+                        end_location["y"],
+                        transport_mode=transport_mode,
+                    )
+                    onward_minutes = _duration_minutes(onward)
+                    if onward_minutes is None:
+                        continue
 
                 time_window_minutes = int(
                     (end_datetime - departure_datetime).total_seconds() / 60
@@ -194,12 +232,16 @@ def find_proactive_suggestion(
                     travel_minutes,
                     onward_minutes,
                 )
-                fits_before_next_schedule = schedule_minutes >= minimum_stay
-                if not fits_before_next_schedule:
+                if schedule_minutes < minimum_stay:
                     continue
+
+                if end_location is not None:
+                    fits_before_next_schedule = True
+
                 visitable_minutes = min(remaining_minutes, schedule_minutes)
 
             return {
+                "suggestion_type": suggestion_type,
                 "place": {
                     key: place.get(key)
                     for key in (
@@ -233,6 +275,7 @@ def find_proactive_suggestion(
                     travel_minutes,
                     visitable_minutes,
                     departure_datetime,
+                    suggestion_type,
                 ),
             }
         except (KeyError, TypeError, ValueError):

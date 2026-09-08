@@ -91,6 +91,10 @@ class RecommendAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["proactive_suggestion"], suggestion)
         self.assertEqual(len(response.json()["other_areas"]), 3)
+        self.assertEqual(
+            self.mock_proactive.call_args.kwargs["activities"],
+            ["cafe"],
+        )
 
     @patch("main.generate_recommendation_message", return_value="추천 설명")
     @patch("main.get_congestion_data", return_value=None)

@@ -44,6 +44,7 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
             "end_location": None,
             "end_datetime": None,
             "transport_mode": "auto",
+            "activities": [],
             "load_popup_places_fn": Mock(return_value=popup_places),
             "load_culture_places_fn": Mock(return_value=[]),
             "get_travel_fn": Mock(return_value={"mode": "walk", "duration_min": 10}),
@@ -60,6 +61,83 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
 
         self.assertEqual(today["reason"], "ending_today")
         self.assertEqual(soon["reason"], "ending_soon")
+        self.assertEqual(today["suggestion_type"], "timely")
+        self.assertEqual(soon["suggestion_type"], "timely")
+
+    def test_matching_activity_is_timely_today_and_ending_soon(self):
+        for days_left in (0, 3):
+            with self.subTest(days_left=days_left):
+                result = self.find(
+                    [self.place(days_left=days_left)],
+                    activities=["culture"],
+                )
+                self.assertEqual(result["suggestion_type"], "timely")
+
+    def test_mismatched_activity_is_detour_only_when_ending_today(self):
+        detour = self.find([self.place()], activities=["cafe"])
+        excluded = self.find(
+            [self.place(days_left=1)],
+            activities=["cafe"],
+        )
+
+        self.assertEqual(detour["suggestion_type"], "detour")
+        self.assertEqual(detour["reason"], "ending_today")
+        self.assertIn("다른 선택지로 제안드려요", detour["message"])
+        self.assertIsNone(excluded)
+
+    def test_detour_travel_limit_is_inclusive(self):
+        allowed = self.find(
+            [self.place()],
+            activities=["cafe"],
+            get_travel_fn=Mock(
+                return_value={"mode": "walk", "duration_min": 15}
+            ),
+        )
+        excluded = self.find(
+            [self.place()],
+            activities=["cafe"],
+            get_travel_fn=Mock(
+                return_value={"mode": "walk", "duration_min": 16}
+            ),
+        )
+
+        self.assertIsNotNone(allowed)
+        self.assertIsNone(excluded)
+
+    def test_timely_suggestion_is_not_limited_to_fifteen_minutes(self):
+        result = self.find(
+            [self.place()],
+            activities=["culture"],
+            get_travel_fn=Mock(
+                return_value={"mode": "transit", "duration_min": 30}
+            ),
+        )
+
+        self.assertEqual(result["suggestion_type"], "timely")
+
+    def test_matching_today_precedes_detour_today(self):
+        result = self.find(
+            [
+                self.place("탈선", category="culture", latitude=37.5001),
+                self.place("일치", category="cafe", latitude=37.502),
+            ],
+            activities=["cafe"],
+        )
+
+        self.assertEqual(result["place"]["name"], "일치")
+        self.assertEqual(result["suggestion_type"], "timely")
+
+    def test_detour_today_precedes_matching_ending_soon(self):
+        result = self.find(
+            [
+                self.place("일치", days_left=1, category="cafe", latitude=37.5001),
+                self.place("탈선", category="culture", latitude=37.502),
+            ],
+            activities=["cafe"],
+        )
+
+        self.assertEqual(result["place"]["name"], "탈선")
+        self.assertEqual(result["suggestion_type"], "detour")
 
     def test_popup_place_includes_card_fields_and_null_urls(self):
         result = self.find([self.place(image_url="https://example.com/image.jpg")])
@@ -177,6 +255,73 @@ class ProactiveRecommendationServiceTests(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+    def test_end_time_without_location_limits_visitable_minutes(self):
+        travel = Mock(return_value={"mode": "walk", "duration_min": 1})
+        result = self.find(
+            [self.place()],
+            end_datetime=self.departure + timedelta(minutes=120),
+            get_travel_fn=travel,
+            evaluate_availability_fn=Mock(
+                return_value=self.open_availability(396)
+            ),
+        )
+
+        self.assertEqual(result["visitable_minutes"], 109)
+        self.assertIsNone(result["fits_before_next_schedule"])
+        self.assertEqual(travel.call_count, 1)
+
+    def test_visitable_minutes_uses_earlier_operation_or_user_limit(self):
+        for remaining, expected in ((396, 109), (70, 70)):
+            with self.subTest(remaining=remaining):
+                result = self.find(
+                    [self.place()],
+                    end_datetime=self.departure + timedelta(minutes=120),
+                    get_travel_fn=Mock(
+                        return_value={"mode": "walk", "duration_min": 1}
+                    ),
+                    evaluate_availability_fn=Mock(
+                        return_value=self.open_availability(remaining)
+                    ),
+                )
+
+                self.assertEqual(result["visitable_minutes"], expected)
+
+    def test_user_time_limit_excludes_place_below_minimum_stay(self):
+        for activities in ([], ["cafe"]):
+            with self.subTest(activities=activities):
+                self.assertIsNone(self.find(
+                    [self.place()],
+                    activities=activities,
+                    end_datetime=self.departure + timedelta(minutes=60),
+                    get_travel_fn=Mock(
+                        return_value={"mode": "walk", "duration_min": 10}
+                    ),
+                ))
+
+        self.assertIsNone(self.find(
+            [self.place()],
+            end_datetime=self.departure + timedelta(minutes=10),
+            get_travel_fn=Mock(
+                return_value={"mode": "walk", "duration_min": 10}
+            ),
+        ))
+
+    def test_next_schedule_keeps_two_travels_and_buffer(self):
+        travel = Mock(side_effect=[
+            {"mode": "walk", "duration_min": 10},
+            {"mode": "walk", "duration_min": 20},
+        ])
+        result = self.find(
+            [self.place()],
+            end_location={"x": 127.1, "y": 37.6},
+            end_datetime=self.departure + timedelta(minutes=120),
+            get_travel_fn=travel,
+        )
+
+        self.assertEqual(result["visitable_minutes"], 80)
+        self.assertTrue(result["fits_before_next_schedule"])
+        self.assertEqual(travel.call_count, 2)
 
     def test_no_next_schedule_does_not_require_onward_travel(self):
         travel = Mock(return_value={"mode": "walk", "duration_min": 10})

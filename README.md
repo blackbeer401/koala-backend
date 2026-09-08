@@ -1,283 +1,369 @@
-# KOALA Backend
+# KOALA Backend — MVP v2
 
-사용자의 현재 위치, 가용 시간, 다음 일정, 활동 선호 등을 바탕으로 서울 내 방문 가능한 지역과 실제 장소를 추천하고, 사용자가 선택한 장소들의 방문 순서를 최적화하여 실제 방문 가능한 코스를 생성하는 FastAPI 기반 백엔드입니다.
+KOALA는 사용자의 자연어 요청, 현재 위치, 가용 시간과 이동수단을 바탕으로 서울의 지역과 실제 장소를 추천하고, 선택한 장소를 실제 이동시간 기준으로 최적화해 방문 코스를 만드는 FastAPI 백엔드입니다.
 
-## 1. MVP v1 개요
+LLM은 자연어를 구조화된 조건으로 변환하는 역할을 담당합니다. 지역·장소·코스의 실제 추천 판단은 백엔드가 시간, 거리, 실제 이동시간, 활동 적합도, 혼잡도, 운영시간을 계산해 결정합니다.
 
-KOALA MVP v1은 사용자의 자연어 입력을 기반으로 다음 과정을 수행합니다.
+## 추천 흐름
 
 ```text
-사용자 자연어 입력
+사용자 자연어 + GPS
         ↓
 LLM 의도 구조화
         ↓
-시작 위치 / 종료 위치 / 시간 조건 처리
+시작·목적·종료 위치와 시간창 해석
         ↓
-서울 121개 후보 지역 생성
+종료 임박 팝업·문화행사 선제 추천
         ↓
-이동시간 / 활동 적합도 / 혼잡도 기반 지역 추천
+서울 121개 지역 후보 평가
+  · 거리와 실제 이동시간
+  · 활동 적합도
+  · 예상 도착시간의 혼잡도
         ↓
-사용자 지역 선택
+선택 지역 주변 실제 장소 추천
+  · Kakao Local / TourAPI
+  · 서울 문화행사 / Popup
+  · 거리 및 실내·야외 선호 soft scoring
+  · 활동별 round-robin
         ↓
-실제 장소 추천
+장소 선택 사전검증
         ↓
-사용자 장소 선택
+선택 장소 전체의 방문 순서 최적화
         ↓
-선택 장소 사전검증
+구간별 실제 이동시간 + 체류시간 계산
         ↓
-실제 이동시간 계산
+예상 도착시간 기준 장소 availability 계산
         ↓
-방문 순서 최적화
-        ↓
-최종 FEASIBLE / INFEASIBLE 판정
+FEASIBLE / INFEASIBLE 코스 반환
 ```
 
-현재 브랜치는 위 흐름이 구현된 MVP v1 기준 백엔드입니다.
+## 주요 기능
 
----
+### 자연어 의도 구조화
 
-## 2. 주요 기능
+- 시작 위치, 목적 지역·장소, 종료 위치
+- 시작·종료 시간과 희망 체류시간 범위
+- `food`, `cafe`, `walk`, `culture`, `entertainment`, `shopping`, `drink`
+- `auto`, `public_transit`, `walk`, `car`
+- 동행 유형과 실내·야외 선호
+- LLM V1.4 Freeze의 resilience, retry, circuit breaker 및 결과 캐시
 
-### 자연어 조건 분석
+LLM이 만든 조건은 `StructuredConditions`로 검증됩니다. 추천 결과 설명은 두 번째 LLM 호출 없이 백엔드의 deterministic template으로 생성합니다.
 
-사용자가 입력한 자연어를 LLM이 구조화된 조건으로 변환합니다.
+### 종료 임박 선제 추천
 
-주요 조건은 다음과 같습니다.
+지역 추천과 함께 현재 위치에서 실제로 방문 가능한 팝업 또는 서울 문화행사를 최대 1개 제안합니다.
 
-* 시작 위치
-* 목적 지역 또는 장소
-* 종료 위치
-* 시작 시간
-* 종료 시간
-* 희망 체류시간
-* 활동 유형
-* 이동수단
-* 동행 유형
-* 예산 관련 조건
-* 실내외 선호
+- 출발일 기준 오늘부터 3일 안에 종료되는 행사
+- 현재 위치에서 직선거리 2km 이내 후보
+- 상위 3개 후보만 실제 이동시간 확인
+- 운영 중이며 활동별 최소 체류시간을 확보할 수 있는 후보
+- 사용자 시간창과 다음 일정이 있으면 이동시간과 10분 안전 버퍼 반영
+- `timely`: 요청 활동과 일치하거나 활동을 지정하지 않은 종료 임박 추천
+- `detour`: 요청 활동과 다르지만 오늘 종료되고 실제 이동시간이 15분 이내인 제안
 
-LLM은 사용자의 의도를 구조화하는 역할을 담당하며, 실제 시간·거리·이동 가능 여부는 백엔드에서 계산합니다.
+Popup과 서울 문화행사 중 한 소스가 실패해도 다른 추천과 기존 지역 추천은 계속 진행합니다.
 
-### 지역 추천
+### 서울 지역 추천
 
-서울 주요 121개 지역을 기준으로 후보를 생성합니다.
+서울 주요 121개 POI를 대상으로 다음 정보를 계산합니다.
 
-주요 판단 요소:
+- 현재 위치 또는 지정한 목적 지역과의 거리
+- 종료 위치가 있을 때의 우회 동선
+- 실제 이동시간과 사용자 시간창
+- 상권 CSV 기반 활동 적합도
+- 예상 도착시간에 가장 가까운 서울 혼잡도 예측
+- 활동, 이동, 혼잡도 점수를 합산한 최종 순위
+- 일반 추천과 이동 부담이 큰 `extended` 후보 분리
 
-* 시작 위치와의 거리
-* 종료 위치가 있는 경우 이동 동선에서의 우회거리
-* 사용 가능한 시간
-* 실제 이동시간
-* 활동 적합도
-* 혼잡도
+`recommendation_context`에는 다음 단계에서 재사용할 구조화 값이 포함됩니다.
 
-추천 결과는 현재 지역과 다른 추천 지역 후보로 구성됩니다.
+- `activities`, `transport_mode`, `space_preference`
+- 해석된 `start_location`, `end_location`
+- timezone-aware `departure_datetime`, `end_datetime`
+- `available_time_minutes`
 
 ### 실제 장소 추천
 
-사용자가 추천 지역을 선택하면 해당 지역 주변의 실제 장소를 조회합니다.
+선택한 지역 중심 2km 안에서 여러 데이터 소스의 후보를 수집합니다. 중복 제거 후 거리 점수와 실내·야외 선호 가점을 계산하고, 여러 활동이 요청되면 활동별 round-robin으로 결과를 구성합니다.
 
-현재 주요 장소 데이터 제공처:
+- 한 페이지에 6개 장소 반환
+- 다음 후보는 15분 TTL의 process-memory cursor cache에서 반환
+- `/recommend/places/more`는 외부 장소 API를 다시 호출하지 않음
+- 만료된 cursor는 `410`, 존재하지 않는 cursor는 `404`
 
-* Kakao Local API
-* TourAPI
+장소에는 가능한 범위에서 다음 공간 metadata가 붙습니다.
 
-여러 활동 유형이 함께 요청된 경우 특정 활동의 장소만 결과 상단을 독점하지 않도록 활동별 후보를 조합하여 추천합니다.
+- `space_type`: `indoor`, `outdoor`, `mixed`, `unknown`
+- `space_type_confidence`: `high`, `medium`, `unknown`
+- `space_type_basis`: `explicit`, `category`, `venue`, `unknown`
+
+`space_preference`는 hard filter가 아니라 보수적인 soft scoring으로만 사용합니다. 근거가 부족한 `unknown` 장소는 불이익을 받지 않습니다.
 
 ### 장소 선택 사전검증
 
-사용자가 실제 방문할 장소를 선택하면 최종 코스 계산 전에 빠른 사전검증을 수행합니다.
+- 코스당 1~6개 장소
+- 활동별 최소·기본 체류시간
+- 사용자가 지정한 장소별 체류시간 반영
+- 선택 단계의 거리 기반 예상 이동시간과 예상 방문 순서
+- 총 가용시간 대비 체류시간 검증
 
-주요 검증 내용:
+이 단계의 이동시간은 빠른 피드백을 위한 휴리스틱입니다. `travel_time_precheck.warning`은 경고이며 최종 hard rejection이 아닙니다.
 
-* 선택 가능한 최대 장소 수
-* 장소별 최소 체류시간
-* 사용 가능한 전체 시간
-* 직선거리 기반 예상 이동시간
+### 코스 최적화와 availability
 
-이 단계의 예상 이동시간은 빠른 사용자 피드백을 위한 휴리스틱이며 최종 가능 여부를 확정하지 않습니다.
+- 선택한 모든 장소를 포함하는 exhaustive permutation
+- 시작 위치 고정, 종료 위치가 있으면 종료 위치 고정
+- `preferred_first=true` 장소가 하나 있으면 첫 방문지로 고정
+- directed leg 단위의 실제 이동시간 및 request-level cache
+- 실패한 이동 구간도 요청 범위에서 캐시
+- 한 순서의 이동 구간이 실패하면 해당 완전한 순서만 제외
+- 계산 가능한 순서 중 실제 총 이동시간이 가장 짧은 순서 선택
+- 체류시간과 이동시간을 합산해 `FEASIBLE` 또는 `INFEASIBLE` 판정
 
-### 방문 순서 최적화
+`departure_datetime`이 전달되면 각 장소의 예상 도착시간을 순서대로 누적하고 `operation_schedule`을 이용해 장소별 availability를 계산합니다. availability가 `closed`여도 이번 MVP에서는 장소 제거, 재정렬 또는 코스 상태 변경에 사용하지 않습니다.
 
-사용자가 선택한 장소들의 가능한 방문 순서를 비교합니다.
+availability 상태:
 
-최대 6개의 선택 장소에 대해 가능한 방문 순서를 검토하고, 모든 선택 장소를 포함하면서 실제 이동시간이 가장 짧은 순서를 선택합니다.
+- `open`
+- `closed`
+- `not_yet_open`
+- `unknown`
+- `event_not_started`
+- `event_ended`
 
-특정 이동 구간 조회가 실패하더라도 다른 방문 순서가 가능한 경우 계속 탐색합니다.
+운영시간이 없거나 확실히 파싱되지 않은 장소는 일반 추천에서 제외하지 않고 `unknown`으로 처리합니다. 자정 이후 마감, 24시간 운영, 하루의 여러 운영 구간과 휴무 일정도 공통 계산에서 처리합니다.
 
-### 최종 코스 판정
+### 회원 및 인증
 
-최종 방문 순서가 결정되면 실제 이동시간과 체류시간을 기준으로 전체 코스를 검증합니다.
+- MySQL + SQLAlchemy
+- 이메일 정규화 및 중복 방지 회원가입
+- Argon2 비밀번호 해싱
+- JWT HS256 Access Token 발급
+- Bearer Token 기반 현재 사용자 조회
+- 요청 단위 DB Session 및 종료 시 close
 
-주요 결과:
+추천 API는 현재 MVP 정책상 로그인 없이 사용할 수 있습니다. DB에는 `users`, `user_preferences`, `activity_categories`, `user_activity_preferences` 모델이 있지만, 사용자 선호 테이블은 아직 추천 개인화에 연결되지 않았습니다.
 
-* 최적 방문 순서
-* 구간별 실제 이동시간
-* 전체 이동시간
-* 전체 체류시간
-* 총 필요시간
-* 잔여시간
-* `FEASIBLE`
-* `INFEASIBLE`
+## 장소 데이터 소스
 
----
+| 소스 | 현재 사용 범위 |
+|---|---|
+| Kakao Local API | `food`, `cafe`, `culture`, `walk` 카테고리 검색, `drink`의 `술집` 키워드 검색, 위치·행정구역 검색 |
+| TourAPI | `culture`, `entertainment`, `shopping` 후보. 데이터가 존재하는 최신 공개 기준월을 제한된 과거 범위에서 탐색 |
+| 서울 문화행사 API | 현재 진행 중인 `culture` 행사와 전시, 운영시간 구조화, 장소 추천 및 선제 추천 |
+| Popup JSON | 현재 진행 중인 `food`, `cafe`, `culture`, `entertainment`, `shopping` 팝업, 운영시간 구조화, 장소 추천 및 선제 추천 |
 
-## 3. 주요 API
+`walk`는 Kakao `AT4` 결과 중 산책에 적합한 세부 카테고리를 보수적으로 필터링합니다. TourAPI와 서울 문화행사 API가 실패하거나 빈 결과를 반환해도 이미 확보한 다른 소스 후보를 유지합니다.
 
-### `GET /`
+## API
 
-백엔드 기본 상태 확인용 엔드포인트입니다.
+FastAPI에 현재 등록되는 endpoint입니다.
 
-### `GET /test-poi`
+| Method | Path | 역할 | 등록 위치 |
+|---|---|---|---|
+| `GET` | `/` | 서버 기본 상태 확인 | `main.py` |
+| `GET` | `/test-poi` | 서울 121개 POI 로딩 확인용 개발 endpoint | `main.py` |
+| `POST` | `/recommend` | 자연어 조건 분석, 선제 추천 및 지역 추천 | `region_routes.py` |
+| `POST` | `/recommend/places` | 선택 지역의 실제 장소 첫 페이지 추천 | `place_routes.py` |
+| `POST` | `/recommend/places/more` | cursor cache의 다음 장소 페이지 반환 | `place_routes.py` |
+| `POST` | `/recommend/places/validate-selection` | 선택 장소 체류시간과 예상 이동시간 사전검증 | `place_routes.py` |
+| `POST` | `/recommend/course` | 실제 이동시간 기반 방문 순서 최적화 및 코스 판정 | `course_routes.py` |
+| `POST` | `/auth/signup` | 회원가입, 성공 시 `201 Created` | `auth_routes.py` |
+| `POST` | `/auth/login` | JWT Access Token 발급 | `auth_routes.py` |
+| `GET` | `/users/me` | Bearer Token으로 현재 사용자 조회 | `auth_routes.py` |
+| `GET` | `/openapi.json` | OpenAPI schema | FastAPI 자동 등록 |
+| `GET` | `/docs` | Swagger UI | FastAPI 자동 등록 |
+| `GET` | `/docs/oauth2-redirect` | Swagger OAuth2 redirect | FastAPI 자동 등록 |
+| `GET` | `/redoc` | ReDoc UI | FastAPI 자동 등록 |
 
-POI 데이터 확인 및 개발 테스트용 엔드포인트입니다.
+요청·응답 schema와 상세 예시는 서버 실행 후 Swagger UI의 `/docs`에서 확인할 수 있습니다.
 
-### `POST /recommend`
+## 성능 및 안정성
 
-사용자의 자연어 입력과 위치 정보를 받아 추천 지역을 반환합니다.
+현재 적용된 최적화와 계측만 정리합니다.
 
-### `POST /recommend/places`
+- 11.5MB 상권 CSV의 지역 활동 점수를 process-memory에 캐시하고 호출자에게 DataFrame 복사본 반환
+- 최종 추천 설명용 두 번째 LLM 호출을 deterministic template으로 대체
+- 일반 지역 후보 최대 5개의 독립적인 이동시간 조회를 `ThreadPoolExecutor(max_workers=3)`로 제한 병렬화
+- 시작 구간이 실패한 후보는 종료 구간을 호출하지 않아 기존 외부 API 호출 조건 유지
+- `[PERFORMANCE]` 로그로 전체, intent LLM, proactive, 이동시간, 혼잡도, 메시지, 정적 데이터 로딩 구간 측정
 
-사용자가 선택한 지역을 기준으로 실제 장소를 추천합니다.
+process-memory cache는 프로세스 사이에 공유되지 않으며 서버가 재시작되면 초기화됩니다.
 
-### `POST /recommend/places/more`
-
-기존 장소 추천 결과의 다음 후보를 반환합니다.
-
-### `POST /recommend/places/validate-selection`
-
-사용자가 선택한 장소들의 체류시간과 예상 이동시간을 기준으로 사전검증을 수행합니다.
-
-### `POST /recommend/course`
-
-선택된 실제 장소들의 방문 순서를 최적화하고 실제 이동시간을 계산하여 최종 코스를 판정합니다.
-
----
-
-## 4. 주요 파일
+## 프로젝트 구조
 
 ```text
-main.py
-    FastAPI 엔드포인트 및 전체 추천 흐름
+main.py                         FastAPI 앱 구성, router 등록, 성능 계측
+models.py                       API 요청·응답 및 LLM 구조화 조건 모델
 
-models.py
-    API 요청 및 내부 구조화 데이터 모델
+region_routes.py                지역 추천 API
+place_routes.py                 장소 추천·pagination·선택 검증 API
+course_routes.py                코스 계산 API
+auth_routes.py                  회원가입·로그인·현재 사용자 API
 
-llm_service.py
-    LLM 의도 분석 및 추천 메시지 처리
+region_recommendation_service.py 지역 후보 평가와 최종 지역 추천
+proactive_recommendation_service.py 종료 임박 timely/detour 선제 추천
+place_recommendation_service.py  Kakao·TourAPI·문화행사·Popup 장소 통합
+place_recommendation_cache.py    장소 추천 cursor pagination cache
+place_ranking.py                 장소 거리 및 공간 선호 soft scoring
+place_space.py                   공통 실내·야외 분류
+place_availability.py            예상 도착시간 기준 운영 가능 여부 계산
 
-conditions.py
-    시작/종료 위치 및 시간 조건 처리
+conditions.py                    위치·시간 조건 해석
+candidate_filter.py              지역 후보 거리·시간 가능성 처리
+ranking.py                       지역 활동·이동·혼잡도 점수 계산
+activity_score.py                상권 데이터 기반 지역별 활동 점수와 캐시
+congestion_service.py            서울 실시간·예측 혼잡도 조회
+poi.py                           서울 121개 지역 후보 로딩
+map_service.py                   Kakao 위치 검색과 도보·대중교통·차량 이동시간
 
-candidate_filter.py
-    후보 지역 시간·거리 조건 필터
+popup_service.py                 Popup JSON 로딩·검증·정규화
+seoul_culture_service.py         서울 문화행사 조회·캐시·운영시간 정규화
+tour_service.py                  TourAPI 기준월 탐색과 관광지 조회
 
-ranking.py
-    지역 추천 랭킹
+stay_time_validation.py          장소 선택 단계 체류·예상 이동시간 검증
+activity_duration_policy.py      활동별 최소·기본 체류시간
+course_order_optimizer.py        완전한 방문 순서 생성과 최적 순서 선택
+route_leg_builder.py             시작·장소·종료 directed leg 생성
+route_travel_time.py             실제 이동시간 조회와 request-level leg cache
+course_time_evaluator.py         이동·체류시간 합산 및 코스 상태 판정
 
-activity_score.py
-    지역별 활동 적합도 계산
+llm_service.py                   LLM V1.4 intent parser 연결과 안내문 template
+LLM/LLM_V1_4_FREEZE/             16-field intent parser와 resilience freeze
 
-congestion_service.py
-    혼잡도 데이터 처리
+database.py                      SQLAlchemy engine, SessionLocal, get_db
+db_models.py                     사용자·선호·활동 SQLAlchemy 모델
+auth.py                          Argon2 비밀번호와 JWT 처리
 
-map_service.py
-    위치 검색 및 이동시간 조회
-
-poi.py
-    서울 121개 POI 데이터 처리
-
-place_recommendation_service.py
-    실제 장소 추천 통합 처리
-
-place_ranking.py
-    실제 장소 후보 점수 및 정렬
-
-place_recommendation_cache.py
-    실제 장소 추천 pagination/cache
-
-tour_service.py
-    TourAPI 연동
-
-stay_time_validation.py
-    선택 장소 체류시간 및 예상 이동시간 사전검증
-
-activity_duration_policy.py
-    활동별 기본 체류시간 정책
-
-route_travel_time.py
-    실제 이동시간 계산
-
-route_leg_builder.py
-    코스 이동 구간 구성
-
-course_order_optimizer.py
-    선택 장소 방문 순서 최적화
-
-course_time_evaluator.py
-    최종 코스 시간 평가
-
-tests/
-    백엔드 단위 및 API 테스트
+data/                            POI·상권·Popup 데이터
+scripts/                         POI 좌표 생성 보조 스크립트
+tests/                           서비스 및 API 회귀 테스트
+requirements.txt                 고정된 직접 Python 의존성
+koala_schema.sql                 MySQL 8 테이블과 활동 카테고리 seed
 ```
 
----
+## 실행 환경 준비
 
-## 5. 실행
+### 1. Python 의존성
 
-Python 환경에서 필요한 패키지를 설치한 뒤 FastAPI 서버를 실행합니다.
+현재 검증 환경은 Python 3.14입니다.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+### 2. MySQL
+
+MySQL 8에서 프로젝트 루트의 schema를 실행합니다.
+
+```powershell
+mysql -u root -p < koala_schema.sql
+```
+
+`koala_schema.sql`은 `koala_db`와 4개 테이블을 `IF NOT EXISTS`로 준비하고 7개 활동 카테고리를 중복 없이 seed합니다. 기존 사용자 데이터나 활동 ID를 삭제하지 않습니다.
+
+### 3. 환경변수
+
+프로젝트 루트에 `.env`를 준비합니다. 실제 비밀값은 저장소에 커밋하지 않습니다.
+
+필수 연결값:
+
+```dotenv
+DATABASE_URL=
+JWT_SECRET_KEY=
+OPENAI_API_KEY=
+KAKAO_REST_API_KEY=
+SEOUL_API_KEY=
+TOUR_API_KEY=
+```
+
+LLM resilience 선택 설정:
+
+```dotenv
+LLM_TOTAL_DEADLINE_SECONDS=
+LLM_FIRST_ATTEMPT_TIMEOUT_SECONDS=
+LLM_RETRY_DELAY_SECONDS=
+LLM_MAX_ATTEMPTS=
+LLM_CIRCUIT_FAILURE_THRESHOLD=
+LLM_CIRCUIT_OPEN_SECONDS=
+LLM_RESULT_CACHE_ENABLED=
+LLM_RESULT_CACHE_TTL_SECONDS=
+LLM_RESULT_CACHE_PATH=
+LLM_RUNTIME_LOG_PATH=
+```
+
+선택 설정을 생략하면 Freeze 모듈의 기본값을 사용합니다. 기본 LLM 결과 캐시는 `.runtime_cache/` 아래에 생성됩니다.
+
+### 4. 서버 실행
 
 ```powershell
 uvicorn main:app --reload
 ```
 
-기본 접속 주소:
+- API: `http://127.0.0.1:8000`
+- Swagger UI: `http://127.0.0.1:8000/docs`
 
-```text
-http://127.0.0.1:8000
+## 테스트
+
+전체 테스트:
+
+```powershell
+python -m pytest -q
 ```
 
-Swagger UI:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
----
-
-## 6. 환경변수
-
-외부 API 사용을 위해 다음 환경변수가 필요합니다.
-
-```text
-OPENAI_API_KEY
-KAKAO_REST_API_KEY
-SEOUL_API_KEY
-TOUR_API_KEY
-```
-
-API Key 및 비밀정보는 Git 저장소에 직접 커밋하지 않습니다.
-
----
-
-## 7. 테스트
-
-전체 테스트 실행:
+개별 unittest 실행도 가능합니다.
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-MVP v1 확정 시점 기준으로 전체 테스트가 정상 통과하는 상태를 유지합니다.
+2026-09-08 현재 실제 실행 결과:
 
----
+```text
+243 passed, 73 subtests passed
+```
 
-## 8. 데이터 출처
+FastAPI `TestClient`에서 Starlette deprecation warning 1건이 발생하지만 테스트 실패는 없습니다.
 
-### 서울 주요 121장소
+## MVP v2 주요 변경사항
 
-* 데이터 출처: 서울 열린데이터광장
-* 데이터명: 서울시 주요 121장소 영역
-* 이용조건: 공공누리 제1유형(출처표시)
+MVP v1의 지역 추천 → 장소 추천 → 코스 생성 흐름을 유지하면서 다음 기능이 추가되었습니다.
 
-기타 외부 데이터와 API의 이용조건 및 출처표시 정책은 각 제공기관의 정책을 따릅니다.
+- Kakao·TourAPI에 서울 문화행사와 Popup 장소 소스 통합
+- `walk`, `drink`를 포함한 7개 활동의 실제 장소 추천
+- 활동별 round-robin과 cursor 기반 추가 장소 pagination
+- 공통 `operation_schedule`과 예상 도착시간 기반 availability
+- 종료 임박 `timely` 및 제한적인 `detour` 선제 추천
+- `recommendation_context`로 다음 API에 필요한 해석 결과 전달
+- 실내·야외 metadata와 사용자 공간 선호 soft scoring
+- 선택 장소 최대 6개, `preferred_first`, directed-leg cache 기반 코스 최적화
+- MySQL·SQLAlchemy 및 JWT 회원가입·로그인
+- 정적 활동 점수 캐시, deterministic 추천 문구, bounded travel concurrency
+- `/recommend` 구간별 성능 계측
+
+## 현재 MVP 범위
+
+현재 구현에 포함되지 않은 항목:
+
+- 사용자 선호 DB를 이용한 추천 개인화
+- OAuth, Refresh Token, 이메일 인증과 비밀번호 재설정
+- Redis 기반 분산 pagination/session cache
+- 날씨 기반 실내·야외 점수 조정
+- 공휴일 판정 API
+- availability를 이용한 장소 자동 제외 또는 코스 재최적화
+- 선제 추천 수락·거절 이력 저장
+
+이 항목들은 현재 동작을 설명하는 기능이 아니라 향후 확장 범위입니다.
+
+## 데이터 출처
+
+- 서울 주요 121장소: 서울 열린데이터광장, 공공누리 제1유형(출처표시)
+- 서울 혼잡도 및 문화행사: 서울 열린데이터광장 API
+- 장소·위치·경로: Kakao Local 및 Kakao Mobility API
+- 관광 POI: 한국관광공사 TourAPI
+- Popup: 프로젝트에 포함된 정적 스냅샷 JSON
+
+외부 데이터와 API의 이용조건 및 출처표시 정책은 각 제공기관 정책을 따릅니다.

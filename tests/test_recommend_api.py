@@ -104,10 +104,10 @@ class RecommendAPITests(unittest.TestCase):
             {
                 "activities": ["cafe"],
                 "transport_mode": "auto",
+                "space_preference": None,
             },
         )
         self.assertNotIn("companions", body["recommendation_context"])
-        self.assertNotIn("space_preference", body["recommendation_context"])
         self.assertNotIn("budget_max", body["recommendation_context"])
         self.assertNotIn("budget_preference", body["recommendation_context"])
         self.assertIsNone(body["target_area"])
@@ -141,6 +141,7 @@ class RecommendAPITests(unittest.TestCase):
             end_location_text="잠실역",
             end_time="15:00",
             transport_mode="public_transit",
+            space_preference="indoor",
         )
         mock_load_candidates.return_value = self.candidates
         mock_load_scores.return_value = activity_scores(self.candidates)
@@ -163,6 +164,7 @@ class RecommendAPITests(unittest.TestCase):
             {
                 "activities": ["cafe"],
                 "transport_mode": "public_transit",
+                "space_preference": "indoor",
             },
         )
         self.assertIsNone(body["current_area"])
@@ -207,6 +209,7 @@ class RecommendAPITests(unittest.TestCase):
             {
                 "activities": [],
                 "transport_mode": "auto",
+                "space_preference": None,
             },
         )
 

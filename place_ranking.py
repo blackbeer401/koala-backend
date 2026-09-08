@@ -29,13 +29,12 @@ def calculate_distance_score(
 
 def add_place_ranking_scores(
     places: list[dict],
+    space_preference: str | None = None,
 ):
     """
     실제 장소 후보에 랭킹 계산용 점수를 추가한다.
 
-    현재는 거리 점수만 계산한다.
-    이후 동행인, 예산, 공간 선호 등의 점수를
-    이 단계에 추가할 수 있다.
+    거리 점수와 사용자의 공간 선호 가점을 계산한다.
     """
 
     scored_places = []
@@ -45,7 +44,8 @@ def add_place_ranking_scores(
 
         scored_place["place_score"] = (
             calculate_place_score(
-                place
+                place,
+                space_preference,
             )
         )
 
@@ -79,17 +79,36 @@ def sort_places_by_score(
 
 def calculate_place_score(
     place: dict,
+    space_preference: str | None = None,
 ):
     """
     실제 장소의 최종 추천 점수를 계산한다.
 
-    현재는 거리 점수만 사용한다.
-    이후 장소 품질, 사용자 선호 등
-    신뢰할 수 있는 기준이 확보되면 여기에서 합산한다.
+    거리 점수에 신뢰 가능한 공간 선호 가점만 합산한다.
     """
 
     distance_score = calculate_distance_score(
         place.get("distance_m")
     )
 
-    return round(distance_score, 2)
+    if (
+        space_preference not in {"indoor", "outdoor"}
+        or place.get("distance_m") is None
+    ):
+        return round(distance_score, 2)
+
+    space_type = place.get("space_type")
+    confidence = place.get("space_type_confidence")
+
+    if space_type == "mixed":
+        space_bonus = 0.5
+    elif space_type != space_preference:
+        space_bonus = 0
+    elif confidence == "high":
+        space_bonus = 2.0
+    elif confidence == "medium":
+        space_bonus = 1.0
+    else:
+        space_bonus = 0
+
+    return round(distance_score + space_bonus, 2)

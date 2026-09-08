@@ -10,6 +10,7 @@ from place_recommendation_service import (
     finalize_recommended_places,
     recommend_places,
 )
+from place_ranking import calculate_place_score
 from place_space import classify_place_space
 
 
@@ -18,6 +19,77 @@ UNKNOWN = {
     "space_type_confidence": "unknown",
     "space_type_basis": "unknown",
 }
+
+
+class PlaceSpaceRankingTests(unittest.TestCase):
+    def test_space_preference_bonuses(self):
+        cases = [
+            ("indoor", "indoor", "high", 2.0),
+            ("indoor", "indoor", "medium", 1.0),
+            ("indoor", "mixed", "high", 0.5),
+            ("indoor", "outdoor", "high", 0),
+            ("indoor", "unknown", "unknown", 0),
+            ("outdoor", "outdoor", "high", 2.0),
+            ("outdoor", "outdoor", "medium", 1.0),
+            ("outdoor", "mixed", "high", 0.5),
+            ("outdoor", "indoor", "high", 0),
+        ]
+
+        for preference, space_type, confidence, bonus in cases:
+            with self.subTest(
+                preference=preference,
+                space_type=space_type,
+                confidence=confidence,
+            ):
+                place = {
+                    "distance_m": 1000,
+                    "space_type": space_type,
+                    "space_type_confidence": confidence,
+                }
+                self.assertEqual(
+                    calculate_place_score(place, preference),
+                    50.0 + bonus,
+                )
+
+    def test_any_none_and_missing_distance_do_not_apply_bonus(self):
+        place = {
+            "distance_m": 1000,
+            "space_type": "indoor",
+            "space_type_confidence": "high",
+        }
+
+        self.assertEqual(calculate_place_score(place, "any"), 50.0)
+        self.assertEqual(calculate_place_score(place, None), 50.0)
+        self.assertEqual(
+            calculate_place_score(place | {"distance_m": None}, "indoor"),
+            0,
+        )
+        self.assertEqual(
+            calculate_place_score(place | {"distance_m": 0}, "indoor"),
+            102.0,
+        )
+
+    def test_small_preference_bonus_can_only_reverse_nearby_places(self):
+        nearby_unknown = {
+            "distance_m": 100,
+            "space_type": "unknown",
+            "space_type_confidence": "unknown",
+        }
+        slightly_farther_indoor = {
+            "distance_m": 130,
+            "space_type": "indoor",
+            "space_type_confidence": "high",
+        }
+        much_farther_indoor = slightly_farther_indoor | {"distance_m": 200}
+
+        self.assertGreater(
+            calculate_place_score(slightly_farther_indoor, "indoor"),
+            calculate_place_score(nearby_unknown, "indoor"),
+        )
+        self.assertLess(
+            calculate_place_score(much_farther_indoor, "indoor"),
+            calculate_place_score(nearby_unknown, "indoor"),
+        )
 
 
 class PlaceSpaceClassifierTests(unittest.TestCase):
@@ -192,6 +264,33 @@ class PlaceSpaceIntegrationTests(unittest.TestCase):
         self.assertEqual(result[0]["space_type"], "unknown")
         self.assertEqual(result[1]["space_type"], "indoor")
 
+    def test_space_preference_keeps_activity_round_robin(self):
+        result = finalize_recommended_places(
+            [
+                self.place("가까운 문화", 100),
+                self.place(
+                    "선호 문화",
+                    130,
+                    category_detail="문화시설 > 박물관",
+                ),
+                self.place("가까운 카페", 100, category="cafe"),
+                self.place(
+                    "선호 카페",
+                    130,
+                    category="cafe",
+                    source="popup",
+                    popup_categories=["실내 팝업"],
+                ),
+            ],
+            ["culture", "cafe"],
+            "indoor",
+        )
+
+        self.assertEqual(
+            [place["name"] for place in result],
+            ["가까운 문화", "선호 카페", "선호 문화", "가까운 카페"],
+        )
+
     def test_tour_fallback_result_keeps_space_metadata(self):
         kakao_place = {
             "id": "museum",
@@ -229,11 +328,13 @@ class PlaceSpaceIntegrationTests(unittest.TestCase):
                 companions=[],
                 budget_max=None,
                 budget_preference=None,
-                space_preference=None,
+                space_preference="indoor",
             )
 
         self.assertEqual(result[0]["space_type"], "indoor")
         self.assertEqual(result[0]["space_type_basis"], "category")
+        self.assertEqual(result[0]["distance_score"], 95.0)
+        self.assertEqual(result[0]["place_score"], 96.0)
 
     def test_cached_pages_keep_metadata_without_reclassification(self):
         places = [
@@ -245,7 +346,11 @@ class PlaceSpaceIntegrationTests(unittest.TestCase):
             "place_recommendation_service.classify_place_space",
             wraps=classify_place_space,
         ) as mock_classify:
-            ranked = finalize_recommended_places(places, ["culture"])
+            ranked = finalize_recommended_places(
+                places,
+                ["culture"],
+                "indoor",
+            )
             first_page = create_place_recommendation_page("지역", ranked)
             calls_after_creation = mock_classify.call_count
             next_page = get_next_place_recommendation_page(
@@ -259,6 +364,10 @@ class PlaceSpaceIntegrationTests(unittest.TestCase):
             "space_type" in place
             for place in first_page.places + next_page.places
         ))
+        self.assertEqual(
+            next_page.places,
+            ranked[len(first_page.places):],
+        )
 
 
 if __name__ == "__main__":

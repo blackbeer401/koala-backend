@@ -826,10 +826,10 @@ def recommend_regions(
         "recommendation_context": {
             "activities": conditions.activities,
             "transport_mode": conditions.transport_mode,
+            "space_preference": conditions.space_preference,
         },
         "target_area": recommendation_result["target_area"],
         "current_area": recommendation_result["current_area"],
         "other_areas": recommendation_result["other_areas"],
         "extended_areas": recommendation_result["extended_areas"],
     }
-

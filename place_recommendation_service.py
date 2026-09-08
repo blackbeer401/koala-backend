@@ -432,6 +432,7 @@ def order_places_by_activity_round_robin(
 def finalize_recommended_places(
     places: list[dict],
     activity_order: list[str],
+    space_preference: str | None = None,
 ):
     """
     수집이 끝난 장소 후보에 공통 후처리를 적용한다.
@@ -453,7 +454,8 @@ def finalize_recommended_places(
     ]
 
     scored_places = add_place_ranking_scores(
-        classified_places
+        classified_places,
+        space_preference,
     )
 
     return order_places_by_activity_round_robin(
@@ -578,6 +580,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
 
     # 1. 추천 지역의 좌표를 기준으로 행정구역을 확인한다.
@@ -594,6 +597,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
 
     # 행정구역을 찾지 못하더라도
@@ -602,6 +606,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
 
     # 2. 행정구 이름을 TourAPI의 시군구 코드로 변환한다.
@@ -617,6 +622,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
 
     # 3. 확인된 자치구를 기준으로 TourAPI에서
@@ -632,6 +638,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
 
     # TourAPI 장소 후보가 없더라도
@@ -640,6 +647,7 @@ def recommend_places(
         return finalize_recommended_places(
             base_places,
             active_activities,
+            space_preference,
         )
     
     # 4. 각 장소와 추천 지역 중심 좌표 사이의
@@ -684,4 +692,5 @@ def recommend_places(
     return finalize_recommended_places(
         combined_places,
         active_activities,
+        space_preference,
     )

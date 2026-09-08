@@ -1,4 +1,5 @@
 import logging
+from threading import Lock
 from time import perf_counter
 
 from fastapi import FastAPI
@@ -103,6 +104,7 @@ def recommend(request: RecommendRequest):
             "poi_load",
         )
     }
+    metrics_lock = Lock()
 
     def measured(name, function):
         def call(*args, **kwargs):
@@ -110,8 +112,10 @@ def recommend(request: RecommendRequest):
             try:
                 return function(*args, **kwargs)
             finally:
-                metrics[name]["seconds"] += perf_counter() - started
-                metrics[name]["calls"] += 1
+                elapsed = perf_counter() - started
+                with metrics_lock:
+                    metrics[name]["seconds"] += elapsed
+                    metrics[name]["calls"] += 1
 
         return call
 

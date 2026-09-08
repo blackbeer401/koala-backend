@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from threading import Event
 from unittest.mock import patch
 
 import pandas as pd
@@ -419,8 +420,62 @@ class RecommendAPITests(unittest.TestCase):
         self.assertIn("proactive_travel=0.", performance_log)
         self.assertIn("region_travel=", performance_log)
         self.assertIn("congestion=", performance_log)
+        self.assertRegex(
+            performance_log,
+            r"region_travel=\d+\.\d+s calls=3",
+        )
         self.assertIn("calls=2", performance_log)
         self.assertIn("calls=3", performance_log)
+
+    def test_parallel_travel_completion_order_does_not_change_candidate_order(self):
+        candidates = [
+            candidate(
+                chr(ord("A") + index),
+                f"지역 {chr(ord('A') + index)}",
+                37.50 + index * 0.01,
+                127.00 + index * 0.01,
+            )
+            for index in range(5)
+        ]
+        scores = activity_scores(candidates)
+        scores["cafe_score"] = 5
+        c_completed = Event()
+        b_completed = Event()
+
+        def travel_pair(place, **_):
+            if place["AREA_CD"] == "A":
+                self.assertTrue(b_completed.wait(timeout=1))
+            elif place["AREA_CD"] == "B":
+                self.assertTrue(c_completed.wait(timeout=1))
+                b_completed.set()
+            elif place["AREA_CD"] == "C":
+                c_completed.set()
+            return ({"duration_min": 20}, {"duration_min": 0})
+
+        with (
+            patch("main.parse_user_intent", return_value=intent()),
+            patch("main.load_poi_candidates", return_value=candidates),
+            patch("main.load_poi_activity_scores", return_value=scores),
+            patch("main.get_congestion_data", return_value=None),
+            patch(
+                "region_recommendation_service._get_candidate_travel_pair",
+                side_effect=travel_pair,
+            ),
+        ):
+            response = self.client.post(
+                "/recommend",
+                json={
+                    "user_message": "근처 카페 추천해줘",
+                    "gps_latitude": 37.40,
+                    "gps_longitude": 126.90,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [place["AREA_CD"] for place in response.json()["other_areas"]],
+            ["A", "B", "C"],
+        )
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from models import RecommendRequest, StructuredConditions
@@ -25,6 +26,49 @@ from ranking import (
     calculate_final_score,
     convert_travel_minutes_to_score,
 )
+
+
+MAX_REGION_TRAVEL_WORKERS = 3
+
+
+def _get_candidate_travel_pair(
+    candidate,
+    *,
+    start_location,
+    end_location,
+    transport_mode,
+    get_travel_fn,
+):
+    start_to_candidate = get_travel_fn(
+        start_location["x"],
+        start_location["y"],
+        candidate["longitude"],
+        candidate["latitude"],
+        transport_mode=transport_mode,
+    )
+    if (
+        start_to_candidate is None
+        or "duration_min" not in start_to_candidate
+    ):
+        return None
+
+    if end_location is None:
+        candidate_to_end = {"duration_min": 0}
+    else:
+        candidate_to_end = get_travel_fn(
+            candidate["longitude"],
+            candidate["latitude"],
+            end_location["x"],
+            end_location["y"],
+            transport_mode=transport_mode,
+        )
+        if (
+            candidate_to_end is None
+            or "duration_min" not in candidate_to_end
+        ):
+            return None
+
+    return start_to_candidate, candidate_to_end
 
 
 def recommend_regions(
@@ -592,44 +636,25 @@ def recommend_regions(
 
     valid_api_candidates = []
 
-    for candidate in api_candidates:
+    with ThreadPoolExecutor(
+        max_workers=MAX_REGION_TRAVEL_WORKERS
+    ) as executor:
+        travel_pairs = list(executor.map(
+            lambda candidate: _get_candidate_travel_pair(
+                candidate,
+                start_location=start_location,
+                end_location=end_location,
+                transport_mode=conditions.transport_mode,
+                get_travel_fn=get_travel_fn,
+            ),
+            api_candidates,
+        ))
 
-        start_to_candidate = get_travel_fn(
-                start_location["x"],
-                start_location["y"],
-                candidate["longitude"],
-                candidate["latitude"],
-                transport_mode=conditions.transport_mode
-            )
-        # 선택한 이동수단으로 후보 지역까지 이동 경로를 구하지 못한 경우
-        if (
-            start_to_candidate is None
-            or "duration_min" not in start_to_candidate
-        ):
+    for candidate, travel_pair in zip(api_candidates, travel_pairs):
+        if travel_pair is None:
             continue
-        # 종료지가 있는 경우에만 후보 → 종료지 이동시간을 계산한다.
-        if end_location is not None:
 
-            candidate_to_end = get_travel_fn(
-                candidate["longitude"],
-                candidate["latitude"],
-                end_location["x"],
-                end_location["y"],
-                transport_mode=conditions.transport_mode
-            )
-
-            # 선택한 이동수단으로 종료지까지 이동 경로를 구하지 못한 경우
-            if (
-                candidate_to_end is None
-                or "duration_min" not in candidate_to_end
-            ):
-                continue
-
-        # 종료지가 없으면 후보 → 종료지 이동시간은 0으로 처리한다.
-        else:
-            candidate_to_end = {
-                "duration_min": 0
-            }
+        start_to_candidate, candidate_to_end = travel_pair
 
         candidate["start_to_candidate_travel_minutes"] = (
             start_to_candidate["duration_min"]

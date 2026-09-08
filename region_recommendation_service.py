@@ -840,6 +840,21 @@ def recommend_regions(
             "activities": conditions.activities,
             "transport_mode": conditions.transport_mode,
             "space_preference": conditions.space_preference,
+            "start_location": {
+                "latitude": start_location["y"],
+                "longitude": start_location["x"],
+            },
+            "departure_datetime": resolved_datetimes["start_datetime"],
+            "end_location": (
+                {
+                    "latitude": end_location["y"],
+                    "longitude": end_location["x"],
+                }
+                if end_location is not None
+                else None
+            ),
+            "end_datetime": resolved_datetimes["end_datetime"],
+            "available_time_minutes": time_window["time_window_minutes"],
         },
         "target_area": recommendation_result["target_area"],
         "current_area": recommendation_result["current_area"],

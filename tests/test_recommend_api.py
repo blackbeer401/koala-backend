@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 import pandas as pd
@@ -141,8 +142,23 @@ class RecommendAPITests(unittest.TestCase):
                 "activities": ["cafe"],
                 "transport_mode": "auto",
                 "space_preference": None,
+                "start_location": {
+                    "latitude": 37.4765,
+                    "longitude": 126.9816,
+                },
+                "departure_datetime": body["recommendation_context"][
+                    "departure_datetime"
+                ],
+                "end_location": None,
+                "end_datetime": None,
+                "available_time_minutes": None,
             },
         )
+        departure = datetime.fromisoformat(
+            body["recommendation_context"]["departure_datetime"]
+        )
+        self.assertIsNotNone(departure.utcoffset())
+        self.assertEqual(departure.strftime("%H:%M"), "12:00")
         self.assertNotIn("companions", body["recommendation_context"])
         self.assertNotIn("budget_max", body["recommendation_context"])
         self.assertNotIn("budget_preference", body["recommendation_context"])
@@ -201,8 +217,33 @@ class RecommendAPITests(unittest.TestCase):
                 "activities": ["cafe"],
                 "transport_mode": "public_transit",
                 "space_preference": "indoor",
+                "start_location": {
+                    "latitude": 37.55,
+                    "longitude": 126.97,
+                },
+                "departure_datetime": body["recommendation_context"][
+                    "departure_datetime"
+                ],
+                "end_location": {
+                    "latitude": 37.51,
+                    "longitude": 127.10,
+                },
+                "end_datetime": body["recommendation_context"][
+                    "end_datetime"
+                ],
+                "available_time_minutes": 180,
             },
         )
+        departure = datetime.fromisoformat(
+            body["recommendation_context"]["departure_datetime"]
+        )
+        end = datetime.fromisoformat(
+            body["recommendation_context"]["end_datetime"]
+        )
+        self.assertIsNotNone(departure.utcoffset())
+        self.assertIsNotNone(end.utcoffset())
+        self.assertEqual(departure.strftime("%H:%M"), "12:00")
+        self.assertEqual(end.strftime("%H:%M"), "15:00")
         self.assertIsNone(body["current_area"])
         self.assertEqual(body["other_areas"], [])
         self.assertEqual(mock_search_location.call_count, 3)
@@ -246,6 +287,16 @@ class RecommendAPITests(unittest.TestCase):
                 "activities": [],
                 "transport_mode": "auto",
                 "space_preference": None,
+                "start_location": {
+                    "latitude": 37.4765,
+                    "longitude": 126.9816,
+                },
+                "departure_datetime": response.json()[
+                    "recommendation_context"
+                ]["departure_datetime"],
+                "end_location": None,
+                "end_datetime": None,
+                "available_time_minutes": None,
             },
         )
 

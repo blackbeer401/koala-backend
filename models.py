@@ -506,3 +506,55 @@ class UserResponse(BaseModel):
     email: str
     nickname: str
     created_at: datetime
+
+
+ActivityCode = Literal[
+    "food",
+    "cafe",
+    "walk",
+    "culture",
+    "entertainment",
+    "shopping",
+    "drink",
+]
+
+
+class ActivityPreferenceUpdate(BaseModel):
+    activity: ActivityCode
+    preference_level: int = Field(ge=1, le=5)
+
+
+class UserPreferencesUpdateRequest(BaseModel):
+    space_preference: Literal["indoor", "outdoor", "any"] | None = None
+    transport_mode: Literal[
+        "auto",
+        "public_transit",
+        "walk",
+        "car",
+    ] | None = None
+    activity_preferences: list[ActivityPreferenceUpdate] = Field(
+        default_factory=list
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_activities(self):
+        activities = [item.activity for item in self.activity_preferences]
+        if len(activities) != len(set(activities)):
+            raise ValueError("같은 activity를 중복해서 보낼 수 없습니다.")
+        return self
+
+
+class ActivityPreferenceResponse(BaseModel):
+    activity: ActivityCode
+    preference_level: int = Field(ge=1, le=5)
+
+
+class UserPreferencesResponse(BaseModel):
+    space_preference: Literal["indoor", "outdoor", "any"] | None
+    transport_mode: Literal[
+        "auto",
+        "public_transit",
+        "walk",
+        "car",
+    ] | None
+    activity_preferences: list[ActivityPreferenceResponse]

@@ -14,6 +14,7 @@ from place_routes import (
     validate_place_selection as validate_place_selection_route,
     router as place_router,
 )
+from preference_routes import router as preference_router
 from region_routes import (
     create_region_router,
 )
@@ -66,6 +67,7 @@ app = FastAPI()
 app.include_router(auth_router)
 app.include_router(course_router)
 app.include_router(place_router)
+app.include_router(preference_router)
 
 
 # 2. 서버 기본 동작 확인

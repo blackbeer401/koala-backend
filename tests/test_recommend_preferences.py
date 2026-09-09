@@ -157,6 +157,10 @@ class RecommendPreferencesTest(unittest.TestCase):
             response.json()["recommendation_context"]["space_preference"]
         )
         self.assertEqual(
+            response.json()["recommendation_context"]["activity_preferences"],
+            {},
+        )
+        self.assertEqual(
             [area["AREA_CD"] for area in response.json()["other_areas"]],
             ["A", "B"],
         )
@@ -181,6 +185,7 @@ class RecommendPreferencesTest(unittest.TestCase):
         self.assertEqual(context["space_preference"], "indoor")
         self.assertEqual(context["transport_mode"], "walk")
         self.assertEqual(context["activities"], ["cafe"])
+        self.assertEqual(context["activity_preferences"], {"cafe": 5})
         self.assertEqual(
             response.json()["other_areas"][0]["activity_match_score"],
             4.2,
@@ -220,6 +225,7 @@ class RecommendPreferencesTest(unittest.TestCase):
         context = response.json()["recommendation_context"]
         self.assertEqual(context["transport_mode"], "auto")
         self.assertIsNone(context["space_preference"])
+        self.assertEqual(context["activity_preferences"], {})
         self.assertEqual(
             response.json()["other_areas"][0]["activity_match_score"],
             4.0,
@@ -235,6 +241,10 @@ class RecommendPreferencesTest(unittest.TestCase):
         self.assertEqual(
             response.json()["recommendation_context"]["activities"],
             ["cafe"],
+        )
+        self.assertEqual(
+            response.json()["recommendation_context"]["activity_preferences"],
+            {},
         )
         self.assertEqual(
             response.json()["other_areas"][0]["activity_match_score"],

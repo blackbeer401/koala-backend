@@ -390,6 +390,22 @@ def resolve_place_activities(
     ))
 
 
+def build_personalized_activity_order(
+    activity_order: list[str],
+    activity_preferences: dict[str, int] | None,
+):
+    priorities = {4: 1, 5: 2}
+    preferences = activity_preferences or {}
+
+    return sorted(
+        activity_order,
+        key=lambda activity: -priorities.get(
+            preferences.get(activity),
+            0,
+        ),
+    )
+
+
 def order_places_by_activity_round_robin(
     places: list[dict],
     activity_order: list[str],
@@ -473,6 +489,7 @@ def recommend_places(
     budget_max: int | None,
     budget_preference: str | None,
     space_preference: str | None,
+    activity_preferences: dict[str, int] | None = None,
 ):
     """
     추천된 지역을 기준으로 실제 방문 장소를 추천한다.
@@ -493,6 +510,10 @@ def recommend_places(
 
     active_activities = resolve_place_activities(
         activities
+    )
+    personalized_activity_order = build_personalized_activity_order(
+        active_activities,
+        activity_preferences,
     )
 
     # Kakao에서 검색 가능한 활동의 실제 장소 후보를 조회한다.
@@ -579,7 +600,7 @@ def recommend_places(
     ):
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
 
@@ -596,7 +617,7 @@ def recommend_places(
         # 해당 후보만으로 랭킹을 계산해서 반환한다.
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
 
@@ -605,7 +626,7 @@ def recommend_places(
     if region is None:
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
 
@@ -621,7 +642,7 @@ def recommend_places(
     if tour_sigungu_code is None:
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
 
@@ -637,7 +658,7 @@ def recommend_places(
     except Exception:
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
 
@@ -646,7 +667,7 @@ def recommend_places(
     if not places:
         return finalize_recommended_places(
             base_places,
-            active_activities,
+            personalized_activity_order,
             space_preference,
         )
     
@@ -691,6 +712,6 @@ def recommend_places(
     # round-robin 순서를 적용한다.
     return finalize_recommended_places(
         combined_places,
-        active_activities,
+        personalized_activity_order,
         space_preference,
     )

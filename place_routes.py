@@ -35,6 +35,7 @@ def recommend_actual_places(
         budget_max=request.budget_max,
         budget_preference=request.budget_preference,
         space_preference=request.space_preference,
+        activity_preferences=request.activity_preferences,
     )
 
     page = create_page_fn(

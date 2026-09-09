@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 from datetime import datetime
 
 from pydantic import (
@@ -383,6 +383,18 @@ class CourseCalculationRequest(BaseModel):
         return self
 
 
+ActivityCode = Literal[
+    "food",
+    "cafe",
+    "walk",
+    "culture",
+    "entertainment",
+    "shopping",
+    "drink",
+]
+PreferenceLevel = Annotated[int, Field(ge=1, le=5)]
+
+
 # 선택한 지역의 실제 장소 추천 요청
 class PlaceRecommendRequest(BaseModel):
     """
@@ -458,6 +470,11 @@ class PlaceRecommendRequest(BaseModel):
         "any",
     ] | None = None
 
+    activity_preferences: dict[
+        ActivityCode,
+        PreferenceLevel,
+    ] = Field(default_factory=dict)
+
 # 회원 인증 관련 모델
 
 class SignupRequest(BaseModel):
@@ -508,20 +525,9 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 
-ActivityCode = Literal[
-    "food",
-    "cafe",
-    "walk",
-    "culture",
-    "entertainment",
-    "shopping",
-    "drink",
-]
-
-
 class ActivityPreferenceUpdate(BaseModel):
     activity: ActivityCode
-    preference_level: int = Field(ge=1, le=5)
+    preference_level: PreferenceLevel
 
 
 class UserPreferencesUpdateRequest(BaseModel):
@@ -546,7 +552,7 @@ class UserPreferencesUpdateRequest(BaseModel):
 
 class ActivityPreferenceResponse(BaseModel):
     activity: ActivityCode
-    preference_level: int = Field(ge=1, le=5)
+    preference_level: PreferenceLevel
 
 
 class UserPreferencesResponse(BaseModel):

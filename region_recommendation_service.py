@@ -877,6 +877,11 @@ def recommend_regions(
         "proactive_suggestion": proactive_suggestion,
         "recommendation_context": {
             "activities": conditions.activities,
+            "activity_preferences": {
+                activity: activity_preferences[activity]
+                for activity in conditions.activities
+                if activity in activity_preferences
+            },
             "transport_mode": conditions.transport_mode,
             "space_preference": conditions.space_preference,
             "start_location": {

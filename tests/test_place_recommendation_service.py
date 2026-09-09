@@ -2,6 +2,9 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
+from main import app
 from place_ranking import calculate_distance_score
 from popup_service import PopupDataError
 from seoul_culture_service import SeoulCultureAPIError
@@ -15,6 +18,7 @@ from place_recommendation_cache import (
 )
 from place_recommendation_service import (
     SUPPORTED_PLACE_ACTIVITIES,
+    build_personalized_activity_order,
     filter_current_nearby_popup_places,
     filter_walk_kakao_places,
     finalize_recommended_places,
@@ -54,6 +58,137 @@ def make_kakao_places(count: int, prefix: str = "카페"):
 
 
 class ActivityPolicyTests(unittest.TestCase):
+
+    def test_personalized_activity_order_policy(self):
+        cases = [
+            (
+                ["cafe", "culture", "walk"],
+                {"cafe": 5, "culture": 4},
+                ["cafe", "culture", "walk"],
+            ),
+            (
+                ["cafe", "culture", "walk"],
+                {"cafe": 4, "culture": 5},
+                ["culture", "cafe", "walk"],
+            ),
+            (
+                ["cafe", "culture"],
+                {"cafe": 5, "culture": 5},
+                ["cafe", "culture"],
+            ),
+            (["cafe", "culture"], None, ["cafe", "culture"]),
+            (["cafe", "culture"], {}, ["cafe", "culture"]),
+            (
+                ["cafe", "culture"],
+                {"shopping": 5},
+                ["cafe", "culture"],
+            ),
+            (
+                ["cafe", "culture", "walk"],
+                {"cafe": 3, "culture": 2, "walk": 1},
+                ["cafe", "culture", "walk"],
+            ),
+            (["cafe"], {"cafe": 5}, ["cafe"]),
+        ]
+
+        for activities, preferences, expected in cases:
+            with self.subTest(
+                activities=activities,
+                preferences=preferences,
+            ):
+                original = activities.copy()
+                self.assertEqual(
+                    build_personalized_activity_order(
+                        activities,
+                        preferences,
+                    ),
+                    expected,
+                )
+                self.assertEqual(activities, original)
+
+    def test_personalization_changes_only_round_robin_activity_order(self):
+        places = [
+            make_place("가까운 카페", "cafe", 100),
+            make_place("먼 카페", "cafe", 200),
+            make_place("가까운 문화", "culture", 100),
+            make_place("먼 문화", "culture", 200),
+        ]
+        original = finalize_recommended_places(
+            places,
+            ["cafe", "culture"],
+        )
+        personalized = finalize_recommended_places(
+            places,
+            build_personalized_activity_order(
+                ["cafe", "culture"],
+                {"culture": 5},
+            ),
+        )
+
+        self.assertEqual(
+            [place["name"] for place in personalized],
+            ["가까운 문화", "가까운 카페", "먼 문화", "먼 카페"],
+        )
+        self.assertEqual(
+            {
+                place["name"]: (place["place_score"], place["distance_score"])
+                for place in personalized
+            },
+            {
+                place["name"]: (place["place_score"], place["distance_score"])
+                for place in original
+            },
+        )
+
+    @patch(
+        "place_recommendation_service.get_region_from_coordinates",
+        return_value=None,
+    )
+    @patch(
+        "place_recommendation_service.load_popup_places",
+        return_value=[],
+    )
+    @patch(
+        "place_recommendation_service.get_nearby_current_exhibitions",
+        return_value=[],
+    )
+    @patch("place_recommendation_service.search_places_by_category")
+    def test_source_lookup_order_stays_original_before_personalized_round_robin(
+        self,
+        mock_search,
+        _mock_culture,
+        _mock_popup,
+        _mock_region,
+    ):
+        def places_for_category(**kwargs):
+            code = kwargs["category_code"]
+            return make_kakao_places(
+                1,
+                "카페" if code == "CE7" else "문화",
+            )
+
+        mock_search.side_effect = places_for_category
+
+        result = recommend_places(
+            area_name="지역",
+            latitude=37.5,
+            longitude=126.9,
+            activities=["cafe", "culture"],
+            companions=[],
+            budget_max=None,
+            budget_preference=None,
+            space_preference=None,
+            activity_preferences={"culture": 5},
+        )
+
+        self.assertEqual(
+            [call.kwargs["category_code"] for call in mock_search.call_args_list],
+            ["CE7", "CT1"],
+        )
+        self.assertEqual(
+            [place["category"] for place in result],
+            ["culture", "cafe"],
+        )
 
     def test_single_activity_returns_only_that_activity(self):
         result = finalize_recommended_places(
@@ -177,6 +312,69 @@ class ActivityPolicyTests(unittest.TestCase):
         )
 
 
+class PlaceActivityPreferenceRequestTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    @staticmethod
+    def payload(**overrides):
+        payload = {
+            "area_name": "지역",
+            "latitude": 37.5,
+            "longitude": 126.9,
+            "activities": ["cafe", "culture"],
+        }
+        payload.update(overrides)
+        return payload
+
+    @patch("place_routes.recommend_places", return_value=[])
+    def test_valid_empty_and_omitted_activity_preferences(self, mock_recommend):
+        payloads = [
+            self.payload(activity_preferences={"cafe": 1, "culture": 5}),
+            self.payload(activity_preferences={}),
+            self.payload(),
+        ]
+
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                response = self.client.post("/recommend/places", json=payload)
+                self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            mock_recommend.call_args_list[0].kwargs["activity_preferences"],
+            {"cafe": 1, "culture": 5},
+        )
+        self.assertEqual(
+            mock_recommend.call_args_list[1].kwargs["activity_preferences"],
+            {},
+        )
+        self.assertEqual(
+            mock_recommend.call_args_list[2].kwargs["activity_preferences"],
+            {},
+        )
+
+    @patch("place_routes.recommend_places")
+    def test_invalid_activity_preferences_return_422(self, mock_recommend):
+        invalid_values = [
+            {"cafe": 0},
+            {"cafe": 6},
+            {"invalid": 5},
+        ]
+
+        for activity_preferences in invalid_values:
+            with self.subTest(activity_preferences=activity_preferences):
+                response = self.client.post(
+                    "/recommend/places",
+                    json=self.payload(
+                        activity_preferences=activity_preferences,
+                    ),
+                )
+                self.assertEqual(response.status_code, 422)
+
+        mock_recommend.assert_not_called()
+
+
 class PlaceRecommendationCacheTests(unittest.TestCase):
 
     def setUp(self):
@@ -220,6 +418,34 @@ class PlaceRecommendationCacheTests(unittest.TestCase):
         self.assertEqual(
             [place["name"] for place in second_page.places],
             ["음식 3", "카페 3", "음식 4", "카페 4", "음식 5", "카페 5"],
+        )
+
+    def test_personalized_round_robin_order_continues_from_cache(self):
+        places = []
+        for index in range(4):
+            places.extend([
+                make_place(f"카페 {index}", "cafe", index * 100),
+                make_place(f"문화 {index}", "culture", index * 100),
+            ])
+
+        activity_order = build_personalized_activity_order(
+            ["cafe", "culture"],
+            {"culture": 5},
+        )
+        ordered = finalize_recommended_places(places, activity_order)
+        first_page = create_place_recommendation_page("지역", ordered)
+        second_page = get_next_place_recommendation_page(
+            first_page.cursor,
+            first_page.next_offset,
+        )
+
+        self.assertEqual(
+            [place["name"] for place in first_page.places],
+            ["문화 0", "카페 0", "문화 1", "카페 1", "문화 2", "카페 2"],
+        )
+        self.assertEqual(
+            [place["name"] for place in second_page.places],
+            ["문화 3", "카페 3"],
         )
 
     def test_places_do_not_repeat_between_pages(self):

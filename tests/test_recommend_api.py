@@ -145,6 +145,7 @@ class RecommendAPITests(unittest.TestCase):
             body["recommendation_context"],
             {
                 "activities": ["cafe"],
+                "activity_preferences": {},
                 "transport_mode": "auto",
                 "space_preference": None,
                 "start_location": {
@@ -220,6 +221,7 @@ class RecommendAPITests(unittest.TestCase):
             body["recommendation_context"],
             {
                 "activities": ["cafe"],
+                "activity_preferences": {},
                 "transport_mode": "public_transit",
                 "space_preference": "indoor",
                 "start_location": {
@@ -290,6 +292,7 @@ class RecommendAPITests(unittest.TestCase):
             response.json()["recommendation_context"],
             {
                 "activities": [],
+                "activity_preferences": {},
                 "transport_mode": "auto",
                 "space_preference": None,
                 "start_location": {

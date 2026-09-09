@@ -26,7 +26,7 @@ ACTIVITY_ORDER = (
 )
 
 
-def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
+def load_recommendation_preferences(db: Session, user_id: int) -> dict:
     preferences = db.scalar(
         select(UserPreference).where(UserPreference.user_id == user_id)
     )
@@ -43,19 +43,32 @@ def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
     ).all()
     activity_rows.sort(key=lambda row: ACTIVITY_ORDER.index(row[1]))
 
-    return UserPreferencesResponse(
-        space_preference=(
+    return {
+        "space_preference": (
             preferences.space_preference if preferences is not None else None
         ),
-        transport_mode=(
+        "transport_mode": (
             preferences.transport_mode if preferences is not None else None
         ),
+        "activity_preferences": {
+            code: activity.preference_level
+            for activity, code in activity_rows
+        },
+    }
+
+
+def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
+    preferences = load_recommendation_preferences(db, user_id)
+
+    return UserPreferencesResponse(
+        space_preference=preferences["space_preference"],
+        transport_mode=preferences["transport_mode"],
         activity_preferences=[
             {
                 "activity": code,
-                "preference_level": activity.preference_level,
+                "preference_level": level,
             }
-            for activity, code in activity_rows
+            for code, level in preferences["activity_preferences"].items()
         ],
     )
 

@@ -29,6 +29,53 @@ from ranking import (
 
 
 MAX_REGION_TRAVEL_WORKERS = 3
+ACTIVITY_PREFERENCE_BONUSES = {
+    4: 0.1,
+    5: 0.2,
+}
+
+
+def _merge_stored_preferences(conditions, stored_preferences):
+    if not stored_preferences:
+        return {}
+
+    if conditions.space_preference is None:
+        conditions.space_preference = stored_preferences.get(
+            "space_preference"
+        )
+
+    if conditions.transport_mode == "auto":
+        conditions.transport_mode = (
+            stored_preferences.get("transport_mode")
+            or conditions.transport_mode
+        )
+
+    return stored_preferences.get("activity_preferences") or {}
+
+
+def _calculate_activity_match_score(
+    candidate,
+    activities,
+    activity_preferences,
+):
+    selected_scores = []
+
+    for activity in activities:
+        score_key = f"{activity}_score"
+        if score_key not in candidate:
+            continue
+
+        score = candidate[score_key]
+        bonus = ACTIVITY_PREFERENCE_BONUSES.get(
+            activity_preferences.get(activity),
+            0,
+        )
+        selected_scores.append(min(5.0, score + bonus))
+
+    if not selected_scores:
+        return 0
+
+    return sum(selected_scores) / len(selected_scores)
 
 
 def _get_candidate_travel_pair(
@@ -82,6 +129,7 @@ def recommend_regions(
     load_poi_activity_scores_fn,
     get_congestion_data_fn,
     find_proactive_suggestion_fn,
+    stored_preferences=None,
 ):
 
     current_datetime = datetime.now().astimezone().isoformat()
@@ -92,6 +140,10 @@ def recommend_regions(
     )
 
     conditions = StructuredConditions(**intent)
+    activity_preferences = _merge_stored_preferences(
+        conditions,
+        stored_preferences,
+    )
 
 
     # 5. 사용자 시작 위치 결정
@@ -326,22 +378,13 @@ def recommend_regions(
             current_area_candidate["culture_score"] = int(row["culture_score"])
             current_area_candidate["shopping_score"] = int(row["shopping_score"])
 
-            selected_scores = []
-
-            for activity in conditions.activities:
-                score_key = f"{activity}_score"
-
-                if score_key in current_area_candidate:
-                    selected_scores.append(
-                        current_area_candidate[score_key]
-                    )
-
-            if selected_scores:
-                current_area_candidate["activity_match_score"] = float(
-                sum(selected_scores) / len(selected_scores)
+            current_area_candidate["activity_match_score"] = float(
+                _calculate_activity_match_score(
+                    current_area_candidate,
+                    conditions.activities,
+                    activity_preferences,
+                )
             )
-            else:
-                current_area_candidate["activity_match_score"] = 0
         else:
             # 현재 지역의 활동 점수 데이터를 찾지 못한 경우
             # 활동 적합도 점수를 0으로 처리한다.
@@ -544,22 +587,13 @@ def recommend_regions(
     # 사용자가 선택한 활동들의 점수만 평균낸다.
     for candidate in scored_candidates:
 
-        selected_scores = []
-
-        for activity in conditions.activities:
-            score_key = f"{activity}_score"
-
-            if score_key in candidate:
-                selected_scores.append(
-                    candidate[score_key]
-                )
-
-        if selected_scores:
-            candidate["activity_match_score"] = (
-                sum(selected_scores) / len(selected_scores)
+        candidate["activity_match_score"] = (
+            _calculate_activity_match_score(
+                candidate,
+                conditions.activities,
+                activity_preferences,
             )
-        else:
-            candidate["activity_match_score"] = 0
+        )
 
     # 시작 위치와 가까운 순서대로 정렬한다.
     distance_ranked_candidates = sorted(

@@ -90,7 +90,10 @@ def test_poi():
     }
 
 
-def recommend(request: RecommendRequest):
+def recommend(
+    request: RecommendRequest,
+    stored_preferences: dict | None = None,
+):
     """기존 직접 호출 테스트를 위한 호환 함수."""
 
     metrics = {
@@ -153,6 +156,7 @@ def recommend(request: RecommendRequest):
                 "proactive",
                 measured_proactive,
             ),
+            stored_preferences=stored_preferences,
         )
     finally:
         performance_logger.info(

@@ -42,6 +42,25 @@ def get_current_user(
     return user
 
 
+def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    if credentials is None:
+        return None
+
+    try:
+        user_id = decode_access_token(credentials.credentials)
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+        raise unauthorized_error()
+
+    user = db.get(User, user_id)
+    if user is None:
+        raise unauthorized_error()
+
+    return user
+
+
 @router.post(
     "/auth/signup",
     response_model=UserResponse,

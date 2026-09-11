@@ -3,6 +3,7 @@ from threading import Lock
 from time import perf_counter
 
 from fastapi import FastAPI
+from adventure_routes import router as adventure_router
 from auth_routes import router as auth_router
 from course_routes import (
     calculate_course as calculate_course_route,
@@ -64,6 +65,7 @@ performance_logger = logging.getLogger("uvicorn.error")
 
 # 1. FastAPI 앱 생성
 app = FastAPI()
+app.include_router(adventure_router)
 app.include_router(auth_router)
 app.include_router(course_router)
 app.include_router(place_router)

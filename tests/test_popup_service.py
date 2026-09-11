@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 
@@ -7,6 +8,7 @@ from unittest.mock import patch
 
 from popup_service import (
     PopupDataError,
+    load_current_popup_places,
     load_popup_places,
     normalize_popup_place,
 )
@@ -76,6 +78,74 @@ class PopupServiceTests(unittest.TestCase):
 
         mock_load.assert_called_once()
         self.assertEqual(second[0]["name"], "테스트 팝업")
+
+    def test_reloads_replaced_file_without_server_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, [make_popup(name="이전 팝업")])
+            first = load_popup_places(path)
+            previous_stat = path.stat()
+
+            self.write_json(directory, [make_popup(name="새로운 팝업")])
+            os.utime(
+                path,
+                ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns + 1),
+            )
+            second = load_popup_places(path)
+
+        self.assertEqual(first[0]["name"], "이전 팝업")
+        self.assertEqual(second[0]["name"], "새로운 팝업")
+
+    def test_current_loader_prefers_operating_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            operating = self.write_json(
+                directory,
+                [make_popup(name="운영 팝업")],
+                "operating.json",
+            )
+            fallback = self.write_json(
+                directory,
+                [make_popup(name="비상 팝업")],
+                "fallback.json",
+            )
+
+            with patch("popup_service.POPUP_DATA_PATH", operating), patch(
+                "popup_service.FALLBACK_POPUP_DATA_PATH",
+                fallback,
+            ):
+                places = load_current_popup_places()
+
+        self.assertEqual(places[0]["name"], "운영 팝업")
+
+    def test_current_loader_falls_back_for_missing_or_invalid_operating_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            operating = Path(directory) / "operating.json"
+            operating.write_text("{broken", encoding="utf-8")
+            fallback = self.write_json(
+                directory,
+                [make_popup(name="비상 팝업")],
+                "fallback.json",
+            )
+
+            with patch("popup_service.POPUP_DATA_PATH", operating), patch(
+                "popup_service.FALLBACK_POPUP_DATA_PATH",
+                fallback,
+            ):
+                places = load_current_popup_places()
+
+        self.assertEqual(places[0]["name"], "비상 팝업")
+
+    def test_current_loader_returns_empty_when_both_files_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            operating = Path(directory) / "missing-operating.json"
+            fallback = Path(directory) / "missing-fallback.json"
+
+            with patch("popup_service.POPUP_DATA_PATH", operating), patch(
+                "popup_service.FALLBACK_POPUP_DATA_PATH",
+                fallback,
+            ):
+                places = load_current_popup_places()
+
+        self.assertEqual(places, [])
 
     def test_preserves_missing_end_date(self):
         place = normalize_popup_place(make_popup(end_date=None))

@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from datetime import datetime
 
 from pydantic import (
@@ -474,6 +474,81 @@ class PlaceRecommendRequest(BaseModel):
         ActivityCode,
         PreferenceLevel,
     ] = Field(default_factory=dict)
+
+
+class AdventureAreaRequest(BaseModel):
+    area_name: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class AdventureRecommendationContextRequest(BaseModel):
+    activities: list[ActivityCode] = Field(default_factory=list)
+    activity_preferences: dict[
+        ActivityCode,
+        PreferenceLevel,
+    ] = Field(default_factory=dict)
+    space_preference: Literal[
+        "indoor",
+        "outdoor",
+        "any",
+    ] | None = None
+    transport_mode: Literal[
+        "auto",
+        "public_transit",
+        "walk",
+        "car",
+    ] = "auto"
+    start_location: CourseLocationRequest
+    departure_datetime: datetime
+    end_location: CourseLocationRequest | None = None
+    available_time_minutes: int = Field(gt=0)
+
+    @field_validator("departure_datetime")
+    @classmethod
+    def validate_departure_datetime(cls, value):
+        if value.utcoffset() is None:
+            raise ValueError(
+                "departure_datetime은 timezone-aware datetime이어야 합니다."
+            )
+        return value
+
+
+class AdventureRequest(BaseModel):
+    area: AdventureAreaRequest
+    recommendation_context: AdventureRecommendationContextRequest
+
+
+class AdventureAvailabilityResponse(BaseModel):
+    status: Literal[
+        "open",
+        "closed",
+        "not_yet_open",
+        "unknown",
+        "event_not_started",
+        "event_ended",
+    ]
+    arrival_at: datetime
+    opening_at: datetime | None = None
+    closing_at: datetime | None = None
+    remaining_minutes: int | None = None
+
+
+class AdventureCoursePreviewResponse(BaseModel):
+    status: Literal["FEASIBLE", "INFEASIBLE"]
+    total_travel_time_minutes: int | float
+    total_stay_time_minutes: int
+    total_required_minutes: int | float
+    remaining_time_minutes: int | float
+
+
+class AdventureResponse(BaseModel):
+    place: dict[str, Any]
+    availability: AdventureAvailabilityResponse
+    availability_confirmed: bool
+    course_preview: AdventureCoursePreviewResponse
+    course_request: CourseCalculationRequest
+
 
 # 회원 인증 관련 모델
 

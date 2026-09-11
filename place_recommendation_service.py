@@ -1,6 +1,4 @@
 from datetime import date, datetime
-from pathlib import Path
-
 from map_service import (
     get_region_from_coordinates,
     search_places_by_category,
@@ -25,9 +23,8 @@ from seoul_culture_service import (
     calculate_distance_m,
     get_nearby_current_exhibitions,
 )
-from popup_service import PopupDataError, load_popup_places
+from popup_service import PopupDataError, load_current_popup_places as load_popup_places
 
-POPUP_DATA_PATH = Path(__file__).resolve().parent / "data" / "20260908_popup_places.json"
 POPUP_MAX_DISTANCE_M = 2000
 POPUP_ACTIVITIES = frozenset({
     "shopping", "entertainment", "food", "cafe", "culture",
@@ -581,7 +578,7 @@ def recommend_places(
     if POPUP_ACTIVITIES.intersection(active_activities):
         try:
             normalized_popup_places = filter_current_nearby_popup_places(
-                load_popup_places(POPUP_DATA_PATH),
+                load_popup_places(),
                 active_activities,
                 latitude,
                 longitude,

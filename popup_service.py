@@ -7,6 +7,11 @@ from functools import lru_cache
 from pathlib import Path
 
 
+PROJECT_DIR = Path(__file__).resolve().parent
+POPUP_DATA_PATH = PROJECT_DIR / "popup_data" / "popup_places.json"
+FALLBACK_POPUP_DATA_PATH = PROJECT_DIR / "data" / "20260908_popup_places.json"
+
+
 _OPERATION_TIME_PATTERN = re.compile(
     r"^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$"
 )
@@ -163,8 +168,12 @@ def normalize_popup_place(popup: dict):
     return normalized
 
 
-@lru_cache(maxsize=1)
-def _load_popup_places_cached(file_path: str):
+@lru_cache(maxsize=2)
+def _load_popup_places_cached(
+    file_path: str,
+    modified_time_ns: int,
+    file_size: int,
+):
     path = Path(file_path)
 
     try:
@@ -192,5 +201,32 @@ def _load_popup_places_cached(file_path: str):
 def load_popup_places(file_path: str | Path):
     """팝업 JSON을 한 번 읽고 정규화된 장소 목록을 반환한다."""
 
-    resolved_path = str(Path(file_path).resolve())
-    return deepcopy(list(_load_popup_places_cached(resolved_path)))
+    path = Path(file_path).resolve()
+
+    try:
+        file_stat = path.stat()
+    except OSError as error:
+        raise PopupDataError(
+            f"팝업 JSON 파일을 확인할 수 없습니다: {path}"
+        ) from error
+
+    return deepcopy(list(_load_popup_places_cached(
+        str(path),
+        file_stat.st_mtime_ns,
+        file_stat.st_size,
+    )))
+
+
+def load_current_popup_places():
+    """운영 팝업 파일을 읽고 실패하면 기본 스냅샷으로 대체한다."""
+
+    for path in (POPUP_DATA_PATH, FALLBACK_POPUP_DATA_PATH):
+        try:
+            places = load_popup_places(path)
+        except PopupDataError:
+            continue
+
+        if places:
+            return places
+
+    return []

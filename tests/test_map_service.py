@@ -24,7 +24,14 @@ class TravelModeTests(unittest.TestCase):
         mock_walking.assert_called_once()
 
     @patch("map_service.get_transit")
-    def test_public_transit_uses_transit_route(self, mock_transit):
+    @patch("map_service.get_walking")
+    @patch("map_service.is_nearby")
+    def test_public_transit_uses_transit_route_without_walking_fallback(
+        self,
+        mock_nearby,
+        mock_walking,
+        mock_transit,
+    ):
         mock_transit.return_value = {"mode": "transit"}
 
         result = map_service.get_travel(
@@ -37,6 +44,80 @@ class TravelModeTests(unittest.TestCase):
 
         self.assertEqual(result["mode"], "transit")
         mock_transit.assert_called_once()
+        mock_nearby.assert_not_called()
+        mock_walking.assert_not_called()
+
+    @patch("map_service.get_transit", return_value=None)
+    @patch("map_service.get_walking", return_value={"mode": "walk"})
+    @patch("map_service.is_nearby", return_value=True)
+    def test_public_transit_falls_back_to_walking_within_500m(
+        self,
+        mock_nearby,
+        mock_walking,
+        mock_transit,
+    ):
+        result = map_service.get_travel(
+            126.9,
+            37.5,
+            126.901,
+            37.5,
+            transport_mode="public_transit",
+        )
+
+        self.assertEqual(result["mode"], "walk")
+        mock_transit.assert_called_once()
+        mock_nearby.assert_called_once_with(
+            126.9,
+            37.5,
+            126.901,
+            37.5,
+            max_distance_km=0.5,
+        )
+        mock_walking.assert_called_once()
+
+    @patch("map_service.get_transit", return_value=None)
+    @patch("map_service.get_walking")
+    @patch("map_service.is_nearby", return_value=False)
+    def test_public_transit_failure_over_500m_does_not_walk(
+        self,
+        mock_nearby,
+        mock_walking,
+        mock_transit,
+    ):
+        result = map_service.get_travel(
+            126.9,
+            37.5,
+            127.0,
+            37.6,
+            transport_mode="public_transit",
+        )
+
+        self.assertIsNone(result)
+        mock_transit.assert_called_once()
+        mock_nearby.assert_called_once()
+        mock_walking.assert_not_called()
+
+    @patch("map_service.get_transit", return_value=None)
+    @patch("map_service.get_walking", return_value=None)
+    @patch("map_service.is_nearby", return_value=True)
+    def test_public_transit_walking_fallback_failure_returns_none(
+        self,
+        mock_nearby,
+        mock_walking,
+        mock_transit,
+    ):
+        result = map_service.get_travel(
+            126.9,
+            37.5,
+            126.901,
+            37.5,
+            transport_mode="public_transit",
+        )
+
+        self.assertIsNone(result)
+        mock_transit.assert_called_once()
+        mock_nearby.assert_called_once()
+        mock_walking.assert_called_once()
 
     @patch("map_service.get_driving")
     def test_car_uses_driving_route(self, mock_driving):

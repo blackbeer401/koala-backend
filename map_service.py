@@ -10,6 +10,7 @@ load_dotenv()
 
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 ACTUAL_ROUTE_WALK_THRESHOLD_KM = 1.5
+PUBLIC_TRANSIT_WALK_FALLBACK_MAX_DISTANCE_M = 500
 
 
 # 2. Kakao API 요청에 사용할 인증 헤더 생성
@@ -716,13 +717,33 @@ def get_travel(
 
     # 10-2. 대중교통을 직접 선택한 경우
     if transport_mode == "public_transit":
-
-        return get_transit(
+        transit = get_transit(
             start_x,
             start_y,
             end_x,
             end_y
         )
+
+        if transit is not None:
+            return transit
+
+        if is_nearby(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            max_distance_km=(
+                PUBLIC_TRANSIT_WALK_FALLBACK_MAX_DISTANCE_M / 1000
+            ),
+        ):
+            return get_walking(
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+            )
+
+        return None
 
     # 10-3. 자동차를 직접 선택한 경우
     if transport_mode == "car":

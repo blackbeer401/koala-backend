@@ -175,6 +175,60 @@ class RecommendAPITests(unittest.TestCase):
         mock_get_travel.assert_called()
         mock_generate_message.assert_called_once()
 
+    @patch("region_recommendation_service.get_nearest_forecast_congestion")
+    @patch("region_recommendation_service.datetime")
+    @patch("main.generate_recommendation_message", return_value="추천 설명")
+    @patch("main.get_congestion_data", return_value={"forecast": True})
+    @patch("main.get_travel", return_value={"duration_min": 20})
+    @patch("main.load_poi_activity_scores")
+    @patch("main.load_poi_candidates")
+    @patch("main.parse_user_intent")
+    def test_start_time_period_drives_arrival_and_congestion_time(
+        self,
+        mock_parse,
+        mock_load_candidates,
+        mock_load_scores,
+        mock_get_travel,
+        mock_get_congestion,
+        mock_generate_message,
+        mock_datetime,
+        mock_nearest_forecast,
+    ):
+        now = datetime.fromisoformat("2026-09-14T11:00:00+09:00")
+        mock_datetime.now.return_value = now
+        mock_parse.return_value = intent(
+            start_time=None,
+            start_time_period="evening",
+        )
+        mock_load_candidates.return_value = self.candidates
+        mock_load_scores.return_value = activity_scores(self.candidates)
+        mock_nearest_forecast.return_value = {
+            "FCST_CONGEST_LVL": "보통",
+        }
+
+        response = self.client.post(
+            "/recommend",
+            json={
+                "user_message": "이따 밤에 분위기 좋은 카페 있어?",
+                "gps_latitude": 37.4765,
+                "gps_longitude": 126.9816,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        context = response.json()["recommendation_context"]
+        self.assertEqual(
+            datetime.fromisoformat(context["departure_datetime"]),
+            datetime.fromisoformat("2026-09-14T18:00:00+09:00"),
+        )
+        self.assertIsNone(context["available_time_minutes"])
+        self.assertTrue(mock_nearest_forecast.called)
+        for call in mock_nearest_forecast.call_args_list:
+            self.assertEqual(
+                call.args[1],
+                datetime.fromisoformat("2026-09-14T18:20:00+09:00"),
+            )
+
     @patch("main.generate_recommendation_message", return_value="목적지 추천")
     @patch("main.get_congestion_data", return_value=None)
     @patch("main.get_travel", return_value={"duration_min": 20})

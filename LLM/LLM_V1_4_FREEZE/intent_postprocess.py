@@ -30,7 +30,19 @@ _DURATION_MENTION_RE = re.compile(_DURATION_CORE)
 _EXPLICIT_WALK_TRANSPORT_RE = re.compile(
     r"걸어서|도보(?:로)?|걸어\s*(?:가|갈|이동)|걷(?:는|기)\s*거리"
 )
+_NEGATED_WALK_TRANSPORT_RE = re.compile(
+    r"(?:걸어서|도보(?:로)?|걸어\s*(?:가|갈|이동)).{0,10}"
+    r"(?:말고|말자|싫|않|안\s*(?:가|갈|걷|돼|됨)|못|없)"
+)
 _ACTIVITY_WALK_RE = re.compile(r"걷|산책")
+
+_EXPLICIT_INDOOR_RE = re.compile(r"실내")
+_EXPLICIT_OUTDOOR_RE = re.compile(r"야외|바깥|밖(?:에서|으로|이|도)|노천")
+_EXPLICIT_SPACE_ANY_RE = re.compile(
+    r"(?:실내외|실내.{0,24}(?:야외|바깥|밖(?:에서|으로|이|도))|"
+    r"(?:야외|바깥|밖(?:에서|으로|이|도)).{0,24}실내)"
+    r".{0,24}상관\s*없|상관\s*없.{0,24}(?:실내외|실내|야외|바깥|밖(?:에서|으로|이|도))"
+)
 
 # Current policy maps culture only from explicit cultural-activity cues.
 # A landmark name or generic "구경" alone must not create culture.
@@ -296,5 +308,40 @@ def postprocess_intent(user_input: str, runtime_context: dict, predicted: dict):
         changes.append({"field":"transport_mode","from":"walk","to":"auto",
                         "reason":"walking_activity_not_transport"})
         out["transport_mode"] = "auto"
+
+    # Rule H: recover an explicit walking transport constraint that the model omitted.
+    # Only replace auto so another explicit transport mode is never overwritten.
+    if (
+        out.get("transport_mode") == "auto"
+        and _EXPLICIT_WALK_TRANSPORT_RE.search(user_input)
+        and not _NEGATED_WALK_TRANSPORT_RE.search(user_input)
+    ):
+        changes.append({"field":"transport_mode","from":"auto","to":"walk",
+                        "reason":"explicit_walk_transport"})
+        out["transport_mode"] = "walk"
+
+    # Rule I: space preference must come from a direct indoor/outdoor expression.
+    # Venue/activity stereotypes such as cafe->indoor or park->outdoor are removed.
+    explicit_any = bool(_EXPLICIT_SPACE_ANY_RE.search(user_input))
+    explicit_indoor = bool(_EXPLICIT_INDOOR_RE.search(user_input))
+    explicit_outdoor = bool(_EXPLICIT_OUTDOOR_RE.search(user_input))
+
+    explicit_space = None
+    if explicit_any:
+        explicit_space = "any"
+    elif explicit_indoor and not explicit_outdoor:
+        explicit_space = "indoor"
+    elif explicit_outdoor and not explicit_indoor:
+        explicit_space = "outdoor"
+
+    current_space = out.get("space_preference")
+    if explicit_space is not None and current_space != explicit_space:
+        changes.append({"field":"space_preference","from":current_space,"to":explicit_space,
+                        "reason":"explicit_space_preference"})
+        out["space_preference"] = explicit_space
+    elif not explicit_indoor and not explicit_outdoor and current_space is not None:
+        changes.append({"field":"space_preference","from":current_space,"to":None,
+                        "reason":"space_without_explicit_cue"})
+        out["space_preference"] = None
 
     return out, changes

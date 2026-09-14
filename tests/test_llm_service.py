@@ -1,11 +1,32 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from llm_service import generate_recommendation_message, parse_user_intent
+from llm_service import (
+    FREEZE_DIR,
+    generate_recommendation_message,
+    parse_user_intent,
+)
 from models import StructuredConditions
 
 
 class LlmServiceTest(unittest.TestCase):
+    def test_prompt_requires_explicit_current_location_as_start(self):
+        prompt = Path(
+            FREEZE_DIR / "intent_parser_prompt_team_v1_3_COST_OPT.txt"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            '"지금 대림인데 8시까지 신림 가기 전에 어디 들를 데가 있을까?" '
+            '→ start="대림", target=null, end="신림".',
+            prompt,
+        )
+        self.assertIn(
+            "사용자가 출발 위치를 명시하지 않았을 때만 백엔드가 GPS를 fallback으로 사용한다",
+            prompt,
+        )
+        self.assertNotIn('"지금/현재 X"는 GPS가 우선이므로 null', prompt)
+
     @patch("llm_service.parse_intent")
     def test_parse_user_intent_delegates_to_freeze_parser(self, mock_parse_intent):
         intent = {

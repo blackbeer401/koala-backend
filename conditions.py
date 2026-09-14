@@ -4,6 +4,15 @@ from zoneinfo import ZoneInfo
 from models import RecommendRequest, StructuredConditions
 
 
+TIME_PERIOD_RANGES = {
+    "morning": (6 * 60, 11 * 60),
+    "lunch": (11 * 60, 15 * 60),
+    "evening": (18 * 60, 24 * 60),
+    "am": (6 * 60, 12 * 60),
+    "pm": (12 * 60, 22 * 60),
+}
+
+
 # 1. 실제 추천 계산에 사용할 시작 위치 결정
 def resolve_start_location(
     request: RecommendRequest,
@@ -83,7 +92,8 @@ def resolve_target_location(
 
 # 3. 추천 계산에 사용할 시작시간 결정
 def resolve_start_time(
-    conditions: StructuredConditions
+    conditions: StructuredConditions,
+    current_datetime: datetime | None = None,
 ):
     """
     사용자가 시작시간을 직접 말하면 해당 시간을 사용하고,
@@ -97,10 +107,30 @@ def resolve_start_time(
             "start_time": conditions.start_time
         }
 
-    # 별도 시작시간이 없으면 현재 한국 시간 사용
-    current_time = datetime.now(
-        ZoneInfo("Asia/Seoul")
-    ).strftime("%H:%M")
+    now = (
+        current_datetime or datetime.now(ZoneInfo("Asia/Seoul"))
+    ).astimezone(ZoneInfo("Asia/Seoul"))
+
+    if conditions.start_time_period is not None:
+        period_start, period_end = TIME_PERIOD_RANGES[
+            conditions.start_time_period
+        ]
+        current_minutes = now.hour * 60 + now.minute
+
+        if current_minutes < period_start:
+            return {
+                "source": "period",
+                "start_time": f"{period_start // 60:02d}:00",
+            }
+
+        if current_minutes < period_end:
+            return {
+                "source": "period",
+                "start_time": now.strftime("%H:%M"),
+            }
+
+    # 별도 시작시간이 없거나 오늘의 시간대가 이미 지났으면 현재 시간 사용
+    current_time = now.strftime("%H:%M")
 
     return {
         "source": "current",
@@ -163,7 +193,8 @@ def resolve_end_time(
 # 6. HH:MM 형태의 시간을 실제 datetime으로 변환
 def resolve_datetimes(
     start_time: dict,
-    end_time: dict
+    end_time: dict,
+    current_datetime: datetime | None = None,
 ):
     """
     시작시간과 종료시간을 실제 datetime 객체로 변환한다.
@@ -184,9 +215,9 @@ def resolve_datetimes(
     → 오늘 23:00 ~ 다음 날 01:00
     """
 
-    now = datetime.now(
-        ZoneInfo("Asia/Seoul")
-    )
+    now = (
+        current_datetime or datetime.now(ZoneInfo("Asia/Seoul"))
+    ).astimezone(ZoneInfo("Asia/Seoul"))
 
     # 시작시간을 오늘 날짜의 datetime으로 변환
     start_datetime = datetime.strptime(

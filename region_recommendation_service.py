@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from models import RecommendRequest, StructuredConditions
 from conditions import (
@@ -132,11 +133,11 @@ def recommend_regions(
     stored_preferences=None,
 ):
 
-    current_datetime = datetime.now().astimezone().isoformat()
+    current_datetime = datetime.now(ZoneInfo("Asia/Seoul"))
 
     intent = parse_user_intent_fn(
         user_input=request.user_message,
-        current_datetime=current_datetime
+        current_datetime=current_datetime.isoformat()
     )
 
     conditions = StructuredConditions(**intent)
@@ -160,7 +161,8 @@ def recommend_regions(
 
     # 7. 시작시간 / 종료위치 / 종료시간 결정
     resolved_start_time = resolve_start_time(
-        conditions
+        conditions,
+        current_datetime=current_datetime,
     )
 
     resolved_end_location = resolve_end_location(
@@ -174,7 +176,8 @@ def recommend_regions(
     # 8. 시작시간과 종료시간을 실제 datetime으로 변환
     resolved_datetimes = resolve_datetimes(
         resolved_start_time,
-        resolved_end_time
+        resolved_end_time,
+        current_datetime=current_datetime,
     )
 
     # 9. 사용자가 실제로 사용할 수 있는 전체 시간 계산

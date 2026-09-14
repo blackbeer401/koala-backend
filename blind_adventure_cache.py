@@ -17,6 +17,7 @@ class BlindAdventureTokenError(Exception):
 class BlindAdventureCacheEntry:
     result: dict
     expires_at: float
+    kind: str
 
 
 _blind_adventure_cache: dict[str, BlindAdventureCacheEntry] = {}
@@ -37,6 +38,7 @@ def store_blind_adventure(
     result: dict,
     *,
     ttl_seconds: int = BLIND_ADVENTURE_TTL_SECONDS,
+    kind: str = "single",
     now_fn: Callable[[], float] = monotonic,
     token_fn: Callable[[int], str] = token_urlsafe,
 ) -> str:
@@ -49,6 +51,7 @@ def store_blind_adventure(
         _blind_adventure_cache[token] = BlindAdventureCacheEntry(
             result=deepcopy(result),
             expires_at=now + ttl_seconds,
+            kind=kind,
         )
     return token
 
@@ -56,13 +59,14 @@ def store_blind_adventure(
 def get_blind_adventure(
     token: str,
     *,
+    kind: str = "single",
     now_fn: Callable[[], float] = monotonic,
 ) -> dict:
     now = now_fn()
     with _blind_adventure_cache_lock:
         _purge_expired_entries(now)
         entry = _blind_adventure_cache.get(token)
-        if entry is None:
+        if entry is None or entry.kind != kind:
             raise BlindAdventureTokenError
         return deepcopy(entry.result)
 

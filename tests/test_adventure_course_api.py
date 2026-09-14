@@ -93,6 +93,18 @@ class AdventureCourseValidationTests(unittest.TestCase):
 
 
 class AdventureCourseServiceTests(unittest.TestCase):
+    def test_empty_place_result_raises_domain_error_before_validation(self):
+        calculate = Mock()
+
+        with self.assertRaises(NoAdventureCandidateError):
+            recommend_two_place_gacha(
+                adventure_request(),
+                recommend_places_fn=Mock(return_value=[]),
+                calculate_course_fn=calculate,
+            )
+
+        calculate.assert_not_called()
+
     def test_pair_under_200m_is_filtered_before_course_validation(self):
         calculate = Mock()
         nearby_places = [

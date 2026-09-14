@@ -519,6 +519,67 @@ class AdventureRequest(BaseModel):
     recommendation_context: AdventureRecommendationContextRequest
 
 
+class SeoulGachaAreaRequest(BaseModel):
+    AREA_NM: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class SeoulGachaRecommendationContextRequest(BaseModel):
+    activities: list[ActivityCode] = Field(default_factory=list)
+    activity_preferences: dict[
+        ActivityCode,
+        PreferenceLevel,
+    ] = Field(default_factory=dict)
+    space_preference: Literal[
+        "indoor",
+        "outdoor",
+        "any",
+    ] | None = None
+    transport_mode: Literal[
+        "auto",
+        "public_transit",
+        "walk",
+        "car",
+    ] = "auto"
+    start_location: CourseLocationRequest
+    departure_datetime: datetime
+    end_location: CourseLocationRequest | None = None
+    end_datetime: datetime | None = None
+    available_time_minutes: int | None = Field(default=None, gt=0)
+
+    @field_validator("departure_datetime", "end_datetime")
+    @classmethod
+    def validate_datetimes(cls, value):
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("datetime은 timezone-aware여야 합니다.")
+        return value
+
+
+class SeoulGachaRequest(BaseModel):
+    target_area: SeoulGachaAreaRequest | None = None
+    current_area: SeoulGachaAreaRequest | None = None
+    other_areas: list[SeoulGachaAreaRequest] = Field(default_factory=list)
+    extended_areas: list[SeoulGachaAreaRequest] = Field(default_factory=list)
+    recommendation_context: SeoulGachaRecommendationContextRequest
+
+
+class SeoulGachaResponse(BaseModel):
+    selected_area: SeoulGachaAreaRequest
+    selection_source: Literal["target", "recommended", "extended"]
+    place_request: PlaceRecommendRequest
+    recommendation_context: SeoulGachaRecommendationContextRequest
+
+
+class RandomQuestRequest(BaseModel):
+    activity: ActivityCode
+
+
+class RandomQuestResponse(BaseModel):
+    activity: ActivityCode
+    quest: str
+
+
 class AdventureAvailabilityResponse(BaseModel):
     status: Literal[
         "open",
@@ -564,6 +625,14 @@ class AdventureCourseResponse(BaseModel):
 class BlindAdventureResponse(BaseModel):
     token: str
     category: ActivityCode
+    availability_confirmed: bool
+    expires_in_seconds: Literal[600]
+
+
+class BlindAdventureCourseResponse(BaseModel):
+    token: str
+    place_count: Literal[2]
+    activities: list[ActivityCode]
     availability_confirmed: bool
     expires_in_seconds: Literal[600]
 

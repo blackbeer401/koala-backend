@@ -550,6 +550,28 @@ class AdventureResponse(BaseModel):
     course_request: CourseCalculationRequest
 
 
+class AdventureCourseResponse(BaseModel):
+    places: list[dict[str, Any]] = Field(min_length=2, max_length=2)
+    availabilities: list[AdventureAvailabilityResponse] = Field(
+        min_length=2,
+        max_length=2,
+    )
+    availability_confirmed: bool
+    course_preview: AdventureCoursePreviewResponse
+    course_request: CourseCalculationRequest
+
+
+class BlindAdventureResponse(BaseModel):
+    token: str
+    category: ActivityCode
+    availability_confirmed: bool
+    expires_in_seconds: Literal[600]
+
+
+class BlindAdventureRevealRequest(BaseModel):
+    token: str
+
+
 # 회원 인증 관련 모델
 
 class SignupRequest(BaseModel):

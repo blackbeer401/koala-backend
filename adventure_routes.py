@@ -1,10 +1,20 @@
 from fastapi import APIRouter, HTTPException
 
 from adventure_service import (
+    create_blind_single_place_gacha,
     NoAdventureCandidateError,
     recommend_single_place_gacha,
+    recommend_two_place_gacha,
+    reveal_blind_single_place_gacha,
 )
-from models import AdventureRequest, AdventureResponse
+from blind_adventure_cache import BlindAdventureTokenError
+from models import (
+    AdventureCourseResponse,
+    AdventureRequest,
+    AdventureResponse,
+    BlindAdventureResponse,
+    BlindAdventureRevealRequest,
+)
 
 
 router = APIRouter()
@@ -18,4 +28,46 @@ def recommend_adventure(request: AdventureRequest):
         raise HTTPException(
             status_code=404,
             detail="현재 조건에서 방문 가능한 가챠 후보가 없습니다.",
+        ) from error
+
+
+@router.post(
+    "/recommend/adventure/course",
+    response_model=AdventureCourseResponse,
+)
+def recommend_adventure_course(request: AdventureRequest):
+    try:
+        return recommend_two_place_gacha(request)
+    except NoAdventureCandidateError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="현재 조건에서 방문 가능한 2장소 가챠 코스가 없습니다.",
+        ) from error
+
+
+@router.post(
+    "/recommend/adventure/blind",
+    response_model=BlindAdventureResponse,
+)
+def recommend_blind_adventure(request: AdventureRequest):
+    try:
+        return create_blind_single_place_gacha(request)
+    except NoAdventureCandidateError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="현재 조건에서 방문 가능한 가챠 후보가 없습니다.",
+        ) from error
+
+
+@router.post(
+    "/recommend/adventure/blind/reveal",
+    response_model=AdventureResponse,
+)
+def reveal_blind_adventure(request: BlindAdventureRevealRequest):
+    try:
+        return reveal_blind_single_place_gacha(request.token)
+    except BlindAdventureTokenError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="유효하지 않거나 만료된 가챠 토큰입니다.",
         ) from error

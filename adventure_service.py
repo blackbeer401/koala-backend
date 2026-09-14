@@ -1,10 +1,16 @@
 from secrets import choice
+from itertools import combinations
 
 from fastapi import HTTPException
 
+from blind_adventure_cache import (
+    BLIND_ADVENTURE_TTL_SECONDS,
+    get_blind_adventure,
+    store_blind_adventure,
+)
 from course_order_optimizer import optimize_course_order
 from course_routes import calculate_course
-from models import AdventureRequest, CourseCalculationRequest
+from models import AdventureRequest, AdventureResponse, CourseCalculationRequest
 from place_recommendation_service import recommend_places
 from stay_time_validation import (
     IMPOSSIBLE_BY_STAY_TIME,
@@ -13,6 +19,9 @@ from stay_time_validation import (
 
 
 MAX_GACHA_VALIDATION_CANDIDATES = 3
+MAX_COURSE_GACHA_PLACE_CANDIDATES = 20
+MAX_COURSE_GACHA_VALIDATION_COMBINATIONS = 3
+MIN_COURSE_GACHA_PLACE_DISTANCE_M = 200
 
 
 class NoAdventureCandidateError(Exception):
@@ -41,7 +50,7 @@ def recommend_single_place_gacha(
         space_preference=context.space_preference,
         activity_preferences=context.activity_preferences,
     )
-
+    
     open_candidates = []
     unknown_candidates = []
 
@@ -117,3 +126,225 @@ def recommend_single_place_gacha(
         raise NoAdventureCandidateError
 
     return choice_fn(candidates)
+
+
+def create_blind_single_place_gacha(
+    request: AdventureRequest,
+    *,
+    recommend_single_fn=recommend_single_place_gacha,
+    store_fn=store_blind_adventure,
+):
+    result = AdventureResponse.model_validate(recommend_single_fn(request))
+    token = store_fn(result.model_dump())
+    return {
+        "token": token,
+        "category": result.place["category"],
+        "availability_confirmed": result.availability_confirmed,
+        "expires_in_seconds": BLIND_ADVENTURE_TTL_SECONDS,
+    }
+
+
+def reveal_blind_single_place_gacha(
+    token: str,
+    *,
+    get_fn=get_blind_adventure,
+):
+    return get_fn(token)
+
+
+def _is_same_place(first: dict, second: dict) -> bool:
+    if first.get("source_id") is not None and second.get("source_id") is not None:
+        return (
+            first.get("source"),
+            first["source_id"],
+        ) == (
+            second.get("source"),
+            second["source_id"],
+        )
+
+    return (
+        first.get("name"),
+        first.get("latitude"),
+        first.get("longitude"),
+    ) == (
+        second.get("name"),
+        second.get("latitude"),
+        second.get("longitude"),
+    )
+
+def _distance_between_places_m(first: dict, second: dict) -> float:
+    from math import radians, sin, cos, sqrt, atan2
+
+    lat1 = radians(first["latitude"])
+    lon1 = radians(first["longitude"])
+    lat2 = radians(second["latitude"])
+    lon2 = radians(second["longitude"])
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    )
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    return 6371000 * c
+
+def _course_gacha_combinations(places: list[dict], prefer_diverse: bool):
+    pairs = [
+        pair
+        for pair in combinations(
+            places[:MAX_COURSE_GACHA_PLACE_CANDIDATES],
+            2,
+        )
+        if not _is_same_place(*pair)
+        and _distance_between_places_m(*pair) >= MIN_COURSE_GACHA_PLACE_DISTANCE_M
+    ]
+    if not prefer_diverse:
+        return [(pair, False) for pair in pairs][
+            :MAX_COURSE_GACHA_VALIDATION_COMBINATIONS
+        ]
+
+    diverse = [pair for pair in pairs if pair[0]["category"] != pair[1]["category"]]
+    same = [pair for pair in pairs if pair[0]["category"] == pair[1]["category"]]
+
+    if not diverse:
+        return [(pair, False) for pair in same][
+            :MAX_COURSE_GACHA_VALIDATION_COMBINATIONS
+        ]
+    if not same:
+        return [(pair, True) for pair in diverse][
+            :MAX_COURSE_GACHA_VALIDATION_COMBINATIONS
+        ]
+
+    # 다양한 activity가 모두 실패해도 검증 상한 안에서 같은 activity를
+    # 한 번 확인할 수 있도록 마지막 한 자리를 fallback에 남긴다.
+    planned = [(pair, True) for pair in diverse[:2]]
+    planned.append((same[0], False))
+    return planned[:MAX_COURSE_GACHA_VALIDATION_COMBINATIONS]
+
+
+def recommend_two_place_gacha(
+    request: AdventureRequest,
+    *,
+    recommend_places_fn=recommend_places,
+    validate_stay_time_fn=validate_selected_places_stay_time,
+    calculate_course_fn=calculate_course,
+    optimize_course_order_fn=optimize_course_order,
+    choice_fn=choice,
+):
+    area = request.area
+    context = request.recommendation_context
+    ranked_places = recommend_places_fn(
+        area_name=area.area_name,
+        latitude=area.latitude,
+        longitude=area.longitude,
+        activities=context.activities,
+        companions=[],
+        budget_max=None,
+        budget_preference=None,
+        space_preference=context.space_preference,
+        activity_preferences=context.activity_preferences,
+    )
+
+    farthest = max(
+        ranked_places,
+        key=lambda place: place.get("distance_m", 0),
+    )
+
+    print(
+        "가장 먼 후보:",
+        farthest.get("name"),
+        farthest.get("category"),
+        farthest.get("distance_m"),
+    )
+    planned_pairs = _course_gacha_combinations(
+        ranked_places,
+        prefer_diverse=len(context.activities) > 1,
+    )
+    pools = {
+        True: {2: [], 1: [], 0: []},
+        False: {2: [], 1: [], 0: []},
+    }
+
+    for pair, is_diverse in planned_pairs:
+        stay_validation = validate_stay_time_fn(
+            [
+                {
+                    "activity": place["category"],
+                    "specified_duration_minutes": place.get(
+                        "specified_duration_minutes"
+                    ),
+                }
+                for place in pair
+            ],
+            context.available_time_minutes,
+        )
+        if stay_validation["status"] == IMPOSSIBLE_BY_STAY_TIME:
+            continue
+
+        course_request = CourseCalculationRequest(
+            start_location=context.start_location,
+            selected_places=[place.copy() for place in pair],
+            available_time_minutes=context.available_time_minutes,
+            departure_datetime=context.departure_datetime,
+            end_location=context.end_location,
+            transport_mode=context.transport_mode,
+        )
+        try:
+            course_result = calculate_course_fn(
+                course_request,
+                optimize_course_order_fn,
+            )
+        except HTTPException as error:
+            if error.status_code == 502:
+                continue
+            raise
+
+        if course_result["status"] != "FEASIBLE":
+            continue
+
+        optimized_places = course_result["optimized_places"]
+        availabilities = [place["availability"] for place in optimized_places]
+        statuses = [availability["status"] for availability in availabilities]
+        if any(status not in {"open", "unknown"} for status in statuses):
+            continue
+
+        open_count = statuses.count("open")
+        pools[is_diverse][open_count].append({
+            "places": [
+                {
+                    key: value
+                    for key, value in place.items()
+                    if key != "availability"
+                }
+                for place in optimized_places
+            ],
+            "availabilities": availabilities,
+            "availability_confirmed": open_count == 2,
+            "course_preview": {
+                key: course_result[key]
+                for key in (
+                    "status",
+                    "total_travel_time_minutes",
+                    "total_stay_time_minutes",
+                    "total_required_minutes",
+                    "remaining_time_minutes",
+                )
+            },
+            "course_request": course_request.model_dump(),
+        })
+
+    activity_groups = (
+        (True, False)
+        if len(context.activities) > 1
+        else (False, True)
+    )
+    for is_diverse in activity_groups:
+        for open_count in (2, 1, 0):
+            candidates = pools[is_diverse][open_count]
+            if candidates:
+                return choice_fn(candidates)
+
+    raise NoAdventureCandidateError

@@ -255,30 +255,44 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-### 2. MySQL
+### 2. 환경변수
 
-MySQL 8에서 프로젝트 루트의 schema를 실행합니다.
+예제 파일을 복사한 뒤 로컬 전용 비밀번호와 필요한 API 키를 설정합니다. 기존 `.env`와 실제 비밀값은 저장소에 커밋하지 않습니다.
 
 ```powershell
-mysql -u root -p < koala_schema.sql
+Copy-Item .env.example .env
 ```
 
-`koala_schema.sql`은 `koala_db`와 4개 테이블을 `IF NOT EXISTS`로 준비하고 7개 활동 카테고리를 중복 없이 seed합니다. 기존 사용자 데이터나 활동 ID를 삭제하지 않습니다.
+`MYSQL_PASSWORD`와 `DATABASE_URL`의 비밀번호는 같아야 합니다. 비밀번호에 URL 예약 문자가 있으면 `DATABASE_URL`에서 URL encoding이 필요합니다.
 
-### 3. 환경변수
+### 3. Docker MySQL
 
-프로젝트 루트에 `.env`를 준비합니다. 실제 비밀값은 저장소에 커밋하지 않습니다.
+로컬 DB는 MySQL 8.4 LTS, `utf8mb4`, 영속 volume으로 실행합니다.
 
-필수 연결값:
-
-```dotenv
-DATABASE_URL=
-JWT_SECRET_KEY=
-OPENAI_API_KEY=
-KAKAO_REST_API_KEY=
-SEOUL_API_KEY=
-TOUR_API_KEY=
+```powershell
+docker compose up -d
+docker compose ps
 ```
+
+Docker healthcheck가 `healthy`가 된 뒤 migration을 실행합니다.
+
+### 4. Migration과 필수 seed
+
+신규 DB의 현재 schema는 Alembic으로 생성하고, 서비스 필수 reference data인 7개 활동 카테고리는 별도 idempotent seed로 준비합니다.
+
+```powershell
+alembic upgrade head
+python -m scripts.seed_activity_categories
+```
+
+기존 `koala_schema.sql`로 이미 생성된 DB에는 최초 한 번 schema가 현재 모델과 같은지 확인한 후 migration을 실행하지 말고 기준 revision만 기록합니다.
+
+```powershell
+alembic stamp head
+python -m scripts.seed_activity_categories
+```
+
+`koala_schema.sql`은 기존 수동 초기화와 비교 확인을 위해 유지합니다. 신규 환경의 표준 경로는 Alembic입니다. 서버 startup에서 `create_all()`이나 자동 seed를 실행하지 않습니다.
 
 LLM resilience 선택 설정:
 
@@ -297,7 +311,7 @@ LLM_RUNTIME_LOG_PATH=
 
 선택 설정을 생략하면 Freeze 모듈의 기본값을 사용합니다. 기본 LLM 결과 캐시는 `.runtime_cache/` 아래에 생성됩니다.
 
-### 4. 서버 실행
+### 5. 서버 실행
 
 ```powershell
 uvicorn main:app --reload
@@ -305,6 +319,26 @@ uvicorn main:app --reload
 
 - API: `http://127.0.0.1:8000`
 - Swagger UI: `http://127.0.0.1:8000/docs`
+
+### 로컬 DB 초기화
+
+로컬 테스트 데이터를 포함해 DB를 완전히 비우려면 컨테이너와 volume을 삭제한 뒤 다시 migration/seed를 실행합니다. 이 명령은 로컬 DB 전체를 삭제하므로 공용·운영 DB에서는 사용하지 않습니다.
+
+```powershell
+docker compose down -v
+docker compose up -d
+alembic upgrade head
+python -m scripts.seed_activity_categories
+```
+
+### 공용 개발 DB와 AWS RDS 원칙
+
+- 로컬, 공용 개발, 운영 DB는 서로 다른 인스턴스와 `DATABASE_URL`을 사용합니다.
+- 공용 개발 DB에는 개발자별 계정을 발급하고 migration 계정과 앱 계정을 분리합니다.
+- 앱 계정에는 schema 변경 권한을 주지 않고 필요한 DML 권한만 부여합니다.
+- 운영 credential은 배포 secret manager에서 주입하며 `.env`나 저장소에 넣지 않습니다.
+- 공용 개발·RDS에도 동일하게 `alembic upgrade head`와 seed 명령을 사용합니다.
+- 테스트 데이터 초기화는 별도 개발 DB에서만 수행하며 운영 데이터에 reset 명령을 사용하지 않습니다.
 
 ## 테스트
 

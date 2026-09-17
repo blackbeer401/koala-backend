@@ -49,6 +49,8 @@ from map_service import (
 from poi import load_poi_candidates
 
 from activity_score import load_poi_activity_scores
+from local_resd_candidates import load_local_resd_candidates
+from local_resd_congestion_adapter import D4DirectCongestionAdapter
 
 from congestion_service import get_congestion_data
 
@@ -150,6 +152,8 @@ def recommend(
                 "activity_score",
                 load_poi_activity_scores,
             ),
+            load_local_resd_candidates_fn=load_local_resd_candidates,
+            d4_congestion_adapter=D4DirectCongestionAdapter(),
             get_congestion_data_fn=measured(
                 "congestion",
                 get_congestion_data,

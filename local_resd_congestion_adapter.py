@@ -17,6 +17,7 @@ from population_history import PopulationHistoryError, load_population_history
 
 ML_CONGESTION_SOURCE = "ml_relative_population"
 NEUTRAL_CONGESTION_SCORE = 3.0
+DEFAULT_D4_DIRECT_ARTIFACT_DIR = Path(__file__).resolve().parent / "ml" / "d4_direct"
 
 
 class D4Provider(Protocol):
@@ -81,9 +82,11 @@ class D4DirectCongestionAdapter:
     def _provider_or_fallback(self) -> D4Provider | None:
         if self._provider is not None:
             return self._provider
-        artifact_dir = self._artifact_dir or os.getenv("D4_DIRECT_ARTIFACT_DIR")
-        if not artifact_dir:
-            return None
+        artifact_dir = (
+            self._artifact_dir
+            or os.getenv("D4_DIRECT_ARTIFACT_DIR")
+            or DEFAULT_D4_DIRECT_ARTIFACT_DIR
+        )
         try:
             return _load_configured_provider(str(Path(artifact_dir).resolve()))
         except (ImportError, OSError, RuntimeError, ValueError):
@@ -99,6 +102,10 @@ class D4DirectCongestionAdapter:
         horizon, horizon_error = _select_d4_horizon(issue_time, expected_arrival_time)
         if horizon is None:
             return _fallback(horizon_error or "invalid_arrival_time")
+        model_issue_time = pd.Timestamp(issue_time)
+        if model_issue_time.tzinfo is not None:
+            model_issue_time = model_issue_time.tz_localize(None)
+        model_issue_time = model_issue_time.floor("h")
 
         provider = self._provider_or_fallback()
         if provider is None:
@@ -106,12 +113,12 @@ class D4DirectCongestionAdapter:
 
         if population is None:
             try:
-                population = self._population_loader(issue_time)
+                population = self._population_loader(model_issue_time)
             except (PopulationHistoryError, OSError, ValueError):
                 return _fallback("population_source_failure")
 
         try:
-            result = provider.predict(local_resd, issue_time, population)
+            result = provider.predict(local_resd, model_issue_time, population)
         except (OSError, RuntimeError, TypeError, ValueError):
             return _fallback("inference_failure")
         if not isinstance(result, dict):

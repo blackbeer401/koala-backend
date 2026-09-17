@@ -243,7 +243,7 @@ def load_population_history(
     frame = _read_history(Path(history_path))
     if issue_time is not None:
         try:
-            issue = pd.Timestamp(issue_time)
+            issue = pd.Timestamp(issue_time).floor("h")
         except (TypeError, ValueError) as exc:
             raise PopulationHistoryError("issue_time 형식이 올바르지 않습니다.") from exc
         required_times = [

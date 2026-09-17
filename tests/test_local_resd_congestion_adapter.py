@@ -141,3 +141,56 @@ def test_invalid_arrival_datetime_does_not_call_provider(population):
     assert response["congestion_status"] == "invalid_arrival_time"
     assert response["congestion_score"] == NEUTRAL_CONGESTION_SCORE
     assert provider.calls == 0
+
+
+def test_provider_and_population_loader_share_hour_floored_issue_time():
+    issue_time = datetime(2026, 9, 17, 15, 19)
+    expected_arrival_time = datetime(2026, 9, 17, 15, 40)
+    loader_calls = []
+
+    class CapturingProvider(FakeProvider):
+        def predict(self, local_resd, model_issue_time, population):
+            self.model_issue_time = model_issue_time
+            return super().predict(local_resd, model_issue_time, population)
+
+    def loader(model_issue_time):
+        loader_calls.append(model_issue_time)
+        return pd.DataFrame()
+
+    provider = CapturingProvider()
+    result = D4DirectCongestionAdapter(
+        provider=provider,
+        population_loader=loader,
+    ).predict("11110515", issue_time, expected_arrival_time)
+
+    expected_model_issue_time = pd.Timestamp("2026-09-17 15:00:00")
+    assert loader_calls == [expected_model_issue_time]
+    assert provider.model_issue_time == expected_model_issue_time
+    assert result["horizon"] == 1
+
+
+def test_aware_issue_time_keeps_seoul_clock_time_and_becomes_naive_for_model():
+    issue_time = pd.Timestamp("2026-09-17T15:28:00+09:00")
+    expected_arrival_time = pd.Timestamp("2026-09-17T15:49:00+09:00")
+    loader_calls = []
+
+    class CapturingProvider(FakeProvider):
+        def predict(self, local_resd, model_issue_time, population):
+            self.model_issue_time = model_issue_time
+            return super().predict(local_resd, model_issue_time, population)
+
+    def loader(model_issue_time):
+        loader_calls.append(model_issue_time)
+        return pd.DataFrame()
+
+    provider = CapturingProvider()
+    result = D4DirectCongestionAdapter(
+        provider=provider,
+        population_loader=loader,
+    ).predict("11110515", issue_time, expected_arrival_time)
+
+    expected_model_issue_time = pd.Timestamp("2026-09-17 15:00:00")
+    assert loader_calls == [expected_model_issue_time]
+    assert provider.model_issue_time == expected_model_issue_time
+    assert provider.model_issue_time.tzinfo is None
+    assert result["horizon"] == 1

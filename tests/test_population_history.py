@@ -178,6 +178,30 @@ def test_loader_returns_provider_schema_and_issue_time_lags(tmp_path):
     assert pd.api.types.is_numeric_dtype(loaded["생활인구합계"])
 
 
+def test_loader_floors_minute_issue_time_before_selecting_d4_lags(tmp_path):
+    history_path = tmp_path / "population_history.csv"
+    issue = pd.Timestamp("2026-09-17 15:10:00")
+    expected_times = [
+        pd.Timestamp("2026-09-03 15:00:00"),
+        pd.Timestamp("2026-09-10 15:00:00"),
+        pd.Timestamp("2026-09-13 15:00:00"),
+    ]
+    population_history._atomic_write_history(
+        pd.DataFrame(
+            {
+                "datetime": expected_times,
+                "행정동코드": ["11110515"] * 3,
+                "생활인구합계": [1.0, 2.0, 3.0],
+            }
+        ),
+        history_path,
+    )
+
+    loaded = population_history.load_population_history(issue, history_path=history_path)
+
+    assert loaded["datetime"].tolist() == expected_times
+
+
 def test_api_failure_does_not_print_api_key(capsys):
     def fail(*args, **kwargs):
         raise requests.Timeout("timeout")

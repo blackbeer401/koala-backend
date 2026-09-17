@@ -9,6 +9,7 @@ def load_poi_candidates():
     딕셔너리 리스트 형태로 변환한다.
     """
 
+# 121 POI는 서울시 실시간 도시데이터 혼잡도와 연결되는 기존 추천 후보군이다.
     # POI 좌표 데이터 불러오기
     df = pd.read_csv(
         "data/poi121_coordinates.csv"

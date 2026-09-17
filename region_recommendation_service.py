@@ -31,8 +31,10 @@ from local_resd_candidates import LocalResdCandidateError
 
 
 MAX_REGION_TRAVEL_WORKERS = 3
+# 421 행정동도 121 POI와 같은 비용 상한을 따르도록, 직선거리 선별과 실제 경로 평가 수를 분리한다.
 MAX_LOCAL_RESD_PRESELECT_CANDIDATES = 20
 MAX_LOCAL_RESD_TRAVEL_CANDIDATES = 5
+# 행정동 점포 집계가 제공하는 활동만 421 branch의 activity score에 반영한다.
 LOCAL_RESD_ACTIVITY_TYPES = frozenset({
     "food", "cafe", "drink", "entertainment",
 })
@@ -126,6 +128,7 @@ def _get_candidate_travel_pair(
 
 
 def _load_local_resd_candidate_records(load_local_resd_candidates_fn):
+    # ML support master가 없는 배포 환경에서도 기존 121 추천은 계속 동작해야 한다.
     try:
         return load_local_resd_candidates_fn().to_dict("records")
     except (LocalResdCandidateError, OSError, ValueError):
@@ -140,6 +143,7 @@ def _select_local_resd_api_candidates(
     activities,
     activity_preferences,
 ):
+    # 저비용 직선거리/detour 선별 뒤에만 활동 점수를 적용해 421개 전체에 경로 API를 호출하지 않는다.
     if end_location is not None:
         preselected = preselect_candidates_by_detour(
             candidates=candidates,
@@ -157,6 +161,7 @@ def _select_local_resd_api_candidates(
             limit=MAX_LOCAL_RESD_PRESELECT_CANDIDATES,
         )
 
+    # walk·culture·shopping만 요청된 경우에는 임의 점수를 만들지 않고 has_activity=False 경로를 사용한다.
     supported_activities = [
         activity for activity in activities if activity in LOCAL_RESD_ACTIVITY_TYPES
     ]
@@ -183,6 +188,7 @@ def _select_local_resd_api_candidates(
     )
     selected = []
     selected_codes = set()
+    # 활동 상위 3개를 먼저 확보하고, 남은 자리는 가까운 후보로 채운다.
     for candidate in activity_ranked[:3]:
         selected.append(candidate)
         selected_codes.add(candidate["LOCAL_RESD_CODE"])
@@ -208,6 +214,7 @@ def _evaluate_local_resd_candidates(
     get_travel_fn,
     d4_congestion_adapter,
 ):
+    # travel pair만 병렬화한다. 체류 가능성·ML 혼잡도·최종 점수는 순서가 보장된 메인 흐름에서 계산한다.
     with ThreadPoolExecutor(max_workers=MAX_REGION_TRAVEL_WORKERS) as executor:
         travel_pairs = list(executor.map(
             lambda candidate: _get_candidate_travel_pair(
@@ -254,6 +261,8 @@ def _evaluate_local_resd_candidates(
                 candidate["travel_time_classification"]["total_travel_minutes"]
             )
 
+        # request start_datetime은 모든 후보의 공통 ML issue time이며, arrival_datetime만 후보별로 달라진다.
+        # adapter의 중립 fallback도 후보를 제외하지 않고 final score에 반영한다.
         candidate.update(d4_congestion_adapter.predict(
             candidate["LOCAL_RESD_CODE"],
             start_datetime,

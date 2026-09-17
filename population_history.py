@@ -21,6 +21,7 @@ POPULATION_PAGE_SIZE = 1000
 EXPECTED_DAILY_ROWS = 427 * 24
 EXPECTED_DAILY_DONGS = 427
 EXPECTED_DAILY_HOURS = 24
+# D-4의 최대 lag(336시간)보다 여유 있게 유지해 일시적인 수집 지연에도 history를 공급한다.
 HISTORY_RETENTION_DAYS = 60
 REQUIRED_HISTORY_COLUMNS = ["datetime", "행정동코드", "생활인구합계"]
 DEFAULT_HISTORY_PATH = Path(__file__).resolve().parent / "data" / "population_history.csv"
@@ -65,6 +66,7 @@ def normalize_population_rows(rows: list[dict]) -> pd.DataFrame:
     if missing:
         raise PopulationHistoryError(f"서울 생활인구 API 필드가 없습니다: {sorted(missing)}")
 
+    # Open API 필드명을 Provider가 요구하는 datetime/행정동코드/생활인구합계 스키마로 고정한다.
     codes = frame["H_DNG_CD"].astype("string").str.strip()
     hours = pd.to_numeric(frame["TT"], errors="coerce")
     population = pd.to_numeric(frame["SPOP"], errors="coerce")
@@ -185,6 +187,7 @@ def _read_history(path: Path) -> pd.DataFrame:
 
 
 def _atomic_write_history(frame: pd.DataFrame, path: Path) -> None:
+    # 임시 파일을 완성한 뒤 교체해 수집·저장 실패가 기존 정상 history를 훼손하지 않게 한다.
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name: str | None = None
     try:
@@ -212,6 +215,7 @@ def update_population_history(
     requested_day = _normalize_day(day)
     path = Path(history_path)
     existing = _read_history(path)
+    # 이미 완전한 하루가 있으면 API 재호출 없이 그대로 재사용한다.
     stored_day = existing[existing["datetime"].dt.normalize() == requested_day]
     if not stored_day.empty:
         try:
@@ -223,6 +227,7 @@ def update_population_history(
 
     new_day = fetch_population_day(requested_day, api_key=api_key, http_get=http_get)
     validate_daily_population(new_day, requested_day)
+    # 같은 시각·행정동은 새 수집값으로 덮어쓰고, 보존 기간 밖 데이터만 정리한다.
     combined = pd.concat([existing, new_day], ignore_index=True)
     combined = combined.drop_duplicates(["datetime", "행정동코드"], keep="last")
     latest_day = combined["datetime"].max().normalize()
@@ -243,6 +248,7 @@ def load_population_history(
     frame = _read_history(Path(history_path))
     if issue_time is not None:
         try:
+            # 생활인구 history는 정시 데이터이므로 분·초가 있는 요청도 해당 시각의 정시로 맞춘다.
             issue = pd.Timestamp(issue_time).floor("h")
         except (TypeError, ValueError) as exc:
             raise PopulationHistoryError("issue_time 형식이 올바르지 않습니다.") from exc

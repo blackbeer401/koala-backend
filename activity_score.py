@@ -421,6 +421,7 @@ def add_category_activity_scores(score_df):
     return result_df
 
 
+# 동일 데이터 파일 조합의 활동 점수는 반복 계산 비용을 줄이기 위해 메모리에 캐시한다.
 @lru_cache(maxsize=4)
 def _load_poi_activity_scores_cached(
     store_file: str,
@@ -478,6 +479,7 @@ def load_poi_activity_scores(
     food / cafe / drink / entertainment 점수를 사용할 수 있다.
     """
 
+    # 호출자에서 원본 캐시 DataFrame을 수정하지 못하도록 복사본을 반환한다.
     cached_scores = _load_poi_activity_scores_cached(
         str(Path(store_file).resolve()),
         str(Path(mapping_file).resolve()),

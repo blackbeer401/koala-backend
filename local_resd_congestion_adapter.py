@@ -15,8 +15,11 @@ import pandas as pd
 from population_history import PopulationHistoryError, load_population_history
 
 
+# 121 POI의 서울시 공식 혼잡도와 구분되는, 생활인구 기반 상대 혼잡도 신호다.
 ML_CONGESTION_SOURCE = "ml_relative_population"
+# 모델·history가 일시적으로 준비되지 않아도 421 후보를 제거하지 않기 위한 중립값이다.
 NEUTRAL_CONGESTION_SCORE = 3.0
+# 배포본에는 모델 파일과 Provider가 함께 들어 있어 Desktop 개발 경로가 필요 없다.
 DEFAULT_D4_DIRECT_ARTIFACT_DIR = Path(__file__).resolve().parent / "ml" / "d4_direct"
 
 
@@ -27,6 +30,7 @@ class D4Provider(Protocol):
 
 @lru_cache(maxsize=1)
 def _load_configured_provider(artifact_dir: str) -> D4Provider:
+    # Provider가 같은 폴더의 standalone_inference를 import하므로 artifact 폴더를 import 경로에 둔다.
     path = Path(artifact_dir)
     if not path.is_dir():
         raise FileNotFoundError("D-4 Direct artifact directory를 찾을 수 없습니다.")
@@ -38,6 +42,7 @@ def _load_configured_provider(artifact_dir: str) -> D4Provider:
 
 
 def _select_d4_horizon(issue_time: object, expected_arrival_time: object) -> tuple[int | None, str | None]:
+    # 도착까지 남은 시간을 올림해 +1h~+6h 예측 중 하나를 선택한다.
     try:
         delta_seconds = (
             pd.Timestamp(expected_arrival_time) - pd.Timestamp(issue_time)
@@ -59,6 +64,7 @@ def select_d4_horizon(issue_time: object, expected_arrival_time: object) -> int 
 
 
 def _fallback(status: str) -> dict:
+    # ML raw 상태는 보존하되, ranking에는 중립 점수만 전달한다.
     return {
         "congestion_source": ML_CONGESTION_SOURCE,
         "congestion_status": status,
@@ -82,6 +88,7 @@ class D4DirectCongestionAdapter:
     def _provider_or_fallback(self) -> D4Provider | None:
         if self._provider is not None:
             return self._provider
+        # 테스트 주입값 → 운영 환경변수 → 저장소 동봉 artifact 순으로 선택한다.
         artifact_dir = (
             self._artifact_dir
             or os.getenv("D4_DIRECT_ARTIFACT_DIR")
@@ -99,9 +106,12 @@ class D4DirectCongestionAdapter:
         expected_arrival_time: object,
         population: pd.DataFrame | None = None,
     ) -> dict:
+        # horizon은 사용자가 요청한 원래 시각 축에서 계산해야 도착 시각 의미가 유지된다.
         horizon, horizon_error = _select_d4_horizon(issue_time, expected_arrival_time)
         if horizon is None:
             return _fallback(horizon_error or "invalid_arrival_time")
+        # population history와 D-4 모델은 서울 현지시각의 naive 시간 단위 축을 사용한다.
+        # UTC 변환 없이 +09:00 표기만 제거해 시계값(예: 15:28)을 유지한다.
         model_issue_time = pd.Timestamp(issue_time)
         if model_issue_time.tzinfo is not None:
             model_issue_time = model_issue_time.tz_localize(None)
@@ -154,6 +164,7 @@ class D4DirectCongestionAdapter:
             return _fallback("malformed_provider_output")
 
         congestion_score = (
+            # 확률 분포를 기존 1~5 ranking 점수로만 변환하며 공식 혼잡도 등급으로 해석하지 않는다.
             probabilities["p0"] * 5
             + probabilities["p1"] * 4
             + probabilities["p2"] * 2

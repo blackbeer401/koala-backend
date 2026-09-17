@@ -21,6 +21,7 @@ DEFAULT_SUPPORT_MASTER_FILE = Path(
     r"C:\Users\Admin\Desktop\ML\deployment\d4_direct_prep\local_resd_support_master.csv"
 )
 DEFAULT_STORE_FILE = Path("data/서울시 상권분석서비스(점포-행정동)_2025년.csv")
+# 427개 모델 지원 코드 중 좌표가 확정된 행정동만 일반 추천 후보로 사용한다.
 EXPECTED_CANDIDATE_COUNT = 421
 ACTIVITY_COLUMNS = tuple(ACTIVITY_BUSINESS_TYPES)
 OUTPUT_COLUMNS = [
@@ -67,6 +68,7 @@ def load_local_resd_support_candidates(
     support["LOCAL_RESD_CODE"] = _normalize_codes(support["LOCAL_RESD_CODE"])
     support["latitude"] = pd.to_numeric(support["latitude"], errors="coerce")
     support["longitude"] = pd.to_numeric(support["longitude"], errors="coerce")
+    # unresolved·ambiguous 좌표는 이동시간 계산이 불가능하므로 후보에서 제외한다.
     candidates = support.loc[
         (support["status"] == "confirmed")
         & support["latitude"].notna()
@@ -86,6 +88,7 @@ def load_local_resd_support_candidates(
 
 
 def _load_local_resd_activity_counts(store_file: str | Path) -> pd.DataFrame:
+    # 121 POI와 같은 최신 분기·업종 매핑을 재사용하되, 집계 단위는 행정동이다.
     store = load_store_data(store_file)
     latest = filter_latest_quarter(store)
     counts = merge_activity_store_counts(aggregate_activity_store_counts(latest))
@@ -103,6 +106,7 @@ def _load_local_resd_candidates_cached(
 ) -> pd.DataFrame:
     candidates = load_local_resd_support_candidates(support_master_file)
     counts = _load_local_resd_activity_counts(store_file)
+    # 좌표가 확정된 421개와 점포 집계를 일대일로 연결해 누락을 조기에 감지한다.
     merged = candidates.merge(
         counts,
         left_on="LOCAL_RESD_CODE",
@@ -124,6 +128,7 @@ def load_local_resd_candidates(
     store_file: str | Path = DEFAULT_STORE_FILE,
 ) -> pd.DataFrame:
     """Return confirmed ML candidates with four activity counts and 1–5 scores."""
+    # cache 원본을 호출자가 수정해 이후 추천 요청에 영향을 주지 않도록 깊은 복사본을 반환한다.
     cached = _load_local_resd_candidates_cached(
         str(Path(support_master_file).resolve()),
         str(Path(store_file).resolve()),

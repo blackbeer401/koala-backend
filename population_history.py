@@ -186,6 +186,22 @@ def _read_history(path: Path) -> pd.DataFrame:
     return frame
 
 
+def get_complete_history_dates(
+    *,
+    history_path: str | Path = DEFAULT_HISTORY_PATH,
+) -> list[date]:
+    """Return dates whose stored rows pass the existing full-day validation."""
+    frame = _read_history(Path(history_path))
+    complete_dates = []
+    for stored_day, day_frame in frame.groupby(frame["datetime"].dt.normalize()):
+        try:
+            validate_daily_population(day_frame, stored_day)
+        except PopulationHistoryError:
+            continue
+        complete_dates.append(stored_day.date())
+    return complete_dates
+
+
 def _atomic_write_history(frame: pd.DataFrame, path: Path) -> None:
     # 임시 파일을 완성한 뒤 교체해 수집·저장 실패가 기존 정상 history를 훼손하지 않게 한다.
     path.parent.mkdir(parents=True, exist_ok=True)

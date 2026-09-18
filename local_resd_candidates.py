@@ -18,7 +18,7 @@ from activity_score import (
 
 
 DEFAULT_SUPPORT_MASTER_FILE = Path(__file__).resolve().parent / "ml" / "d4_direct" / "local_resd_support_master.csv"
-DEFAULT_STORE_FILE = Path("data/서울시 상권분석서비스(점포-행정동)_2025년.csv")
+DEFAULT_STORE_FILE = Path(__file__).resolve().parent / "data" / "서울시 상권분석서비스(점포-행정동)_2025년.csv"
 # 427개 모델 지원 코드 중 좌표가 확정된 행정동만 일반 추천 후보로 사용한다.
 EXPECTED_CANDIDATE_COUNT = 421
 ACTIVITY_COLUMNS = tuple(ACTIVITY_BUSINESS_TYPES)

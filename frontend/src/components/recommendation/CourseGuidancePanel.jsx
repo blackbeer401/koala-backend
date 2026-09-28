@@ -6,7 +6,6 @@ import { formatLegTransport } from "../../utils/courseNavigation";
 import { courseStopColors } from "../../config/recommendationDisplay";
 import { questForPlace } from "../../utils/questMissions";
 import { placeIdentity } from "../../utils/recommendationPlaces";
-import CourseQuestToggle from "./CourseQuestToggle";
 
 export default function CourseGuidancePanel({
   guideIsComplete,
@@ -37,8 +36,6 @@ export default function CourseGuidancePanel({
   arrivalQuestStatus,
   arrivalQuestReward,
   onQuestProgressChange,
-  questsEnabled,
-  onToggleQuests,
   hasEndDestination,
   setMysteryRevealed,
   resetCourseSelection,
@@ -207,7 +204,6 @@ export default function CourseGuidancePanel({
               </p>
             )}
           </section>
-          <CourseQuestToggle enabled={questsEnabled} onChange={onToggleQuests} account={account} />
           {mysteryMode && guidePreviousPlace && (
             <div className="mystery-arrival-card" role="status">
               <small>방금 도착한 장소</small>

@@ -5,11 +5,7 @@ import {
   getRecoveryStatus,
   isMockAuthEnabled,
   requestPasswordReset,
-  requestUsernameRecovery,
-  requestRecoveryEmailUpdate,
   sendSignupEmailCode,
-  verifyUsernameRecovery,
-  verifyRecoveryEmailUpdate,
 } from "../../api/accountApi";
 
 const SeoulExplorer = lazy(() => import("./SeoulExplorer"));
@@ -24,6 +20,21 @@ const ACTIVITIES = [
   ["shopping", "쇼핑", "🛍"],
   ["drink", "술집", "🥂"],
 ];
+
+function TravelRankBadge({ rankId, rankName }) {
+  const imageByRank = {
+    travel_novice: "travel-novice.webp",
+    travel_intermediate: "travel-intermediate.webp",
+    travel_expert: "travel-expert.webp",
+    traveler: "traveler.webp",
+    travel_scholar: "travel-scholar.webp",
+  };
+  const image = imageByRank[rankId];
+  if (!image) return null;
+  return (
+    <img className="travel-rank-badge" src={`/images/travel-ranks/${image}`} alt={`${rankName} 등급 코알라 배지`} />
+  );
+}
 
 function PersonalizationSignals({ account }) {
   const labels = Object.fromEntries(ACTIVITIES.map(([code, label]) => [code, label]));
@@ -49,14 +60,19 @@ function PersonalizationSignals({ account }) {
 }
 
 function TravelProgressCard({ gamification, error, onEquipTitle }) {
+  const [achievementsExpanded, setAchievementsExpanded] = useState(false);
   if (!gamification) return <section className="travel-progress-card is-loading">여행 기록을 불러오고 있어요…</section>;
   const goal = gamification.next_rank_xp;
   const barWidth = goal == null ? 100 : Math.min(100, Math.round((gamification.xp_into_rank / Math.max(1, gamification.xp_into_rank + gamification.xp_to_next_rank)) * 100));
   const achieved = gamification.achievements?.filter((item) => item.unlocked) ?? [];
+  const unlockedTitles = gamification.unlocked_titles ?? [];
   return (
     <section className="travel-progress-card" aria-label="여행 레벨과 칭호">
       <div className="travel-progress-heading">
-        <div><small>KOALA TRAVEL LEVEL</small><b>{gamification.rank_name}</b></div>
+        <div className="travel-rank-identity">
+          <TravelRankBadge rankId={gamification.rank_id} rankName={gamification.rank_name} />
+          <span><small>KOALA TRAVEL LEVEL</small><b>{gamification.rank_name}</b></span>
+        </div>
         <strong>Lv.{gamification.rank_index}<small> / {gamification.rank_count}</small></strong>
       </div>
       <div className="travel-progress-track" role="progressbar" aria-label="다음 등급 경험치" aria-valuenow={goal == null ? 100 : gamification.xp_into_rank} aria-valuemin={0} aria-valuemax={goal == null ? 100 : Math.max(1, gamification.xp_into_rank + gamification.xp_to_next_rank)}>
@@ -64,79 +80,31 @@ function TravelProgressCard({ gamification, error, onEquipTitle }) {
       </div>
       <div className="travel-progress-meta"><b>{gamification.total_xp.toLocaleString()} XP</b><span>{gamification.xp_to_next_rank ? `다음 등급까지 ${gamification.xp_to_next_rank} XP` : "최고 등급을 달성했어요"}</span></div>
       <small className="travel-reward-rules">코스 확정 +10 · 안내 완료 +15 · 퀘스트 메인 +10 / 보너스 +5 · 처음 여는 지역 +20 XP<br />코스 확정과 안내 완료는 하루 3회, 퀘스트는 하루 최대 15 XP까지 적립돼요.</small>
-      <label className="travel-title-picker">메인 화면 칭호
-        <select value={gamification.equipped_title?.id ?? ""} onChange={(event) => onEquipTitle(event.target.value)} aria-label="메인 화면에 표시할 칭호">
-          {(gamification.unlocked_titles ?? []).map((title) => <option value={title.id} key={title.id}>{title.name}</option>)}
+      <label className="travel-title-picker">메인 화면 칭호 <small>등급과 별도로 업적을 달성해 얻어요.</small>
+        <select value={gamification.equipped_title?.id ?? ""} onChange={(event) => onEquipTitle(event.target.value)} aria-label="메인 화면에 표시할 칭호" disabled={!unlockedTitles.length}>
+          {unlockedTitles.length
+            ? unlockedTitles.map((title) => <option value={title.id} key={title.id}>{title.name}</option>)
+            : <option value="">업적 칭호를 아직 얻지 않았어요</option>}
         </select>
       </label>
-      <div className="travel-achievements" aria-label="업적">
-        <b>업적 <small>{achieved.length} / {gamification.achievements?.length ?? 0}</small></b>
-        {(gamification.achievements ?? []).map((achievement) => (
-          <span className={achievement.unlocked ? "is-unlocked" : ""} key={achievement.id} title={achievement.description}>
-            {achievement.unlocked ? "✦" : "·"} {achievement.name} {achievement.unlocked ? "" : `${achievement.progress}/${achievement.goal}`}
-          </span>
-        ))}
+      <div className={`travel-achievements${achievementsExpanded ? " is-expanded" : ""}`} aria-label="업적">
+        <div className="travel-achievements-heading">
+          <b>업적 <small>{achieved.length} / {gamification.achievements?.length ?? 0}</small></b>
+          <button type="button" className="travel-achievements-toggle" aria-expanded={achievementsExpanded} aria-controls="travel-achievements-list" onClick={() => setAchievementsExpanded((expanded) => !expanded)}>
+            {achievementsExpanded ? "접기" : "업적 보기"}
+          </button>
+        </div>
+        {achievementsExpanded && <div id="travel-achievements-list" className="travel-achievements-list">
+          {(gamification.achievements ?? []).map((achievement) => (
+            <article className={`travel-achievement${achievement.unlocked ? " is-unlocked" : ""}`} key={achievement.id}>
+              <div><strong>{achievement.unlocked ? "✦" : "○"} {achievement.name}</strong><span>{achievement.unlock_source === "manual" ? "특별 해제" : achievement.unlocked ? "달성" : `${achievement.progress}/${achievement.goal}`}</span></div>
+              <small>{achievement.description}</small>
+              <small className="travel-achievement-title">보상 칭호 · {achievement.title_name}</small>
+            </article>
+          ))}
+        </div>}
       </div>
       {error && <p className="travel-progress-error" role="alert">{error}</p>}
-    </section>
-  );
-}
-
-function RecoveryEmailSettings({ token, currentEmail }) {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [emailEnabled, setEmailEnabled] = useState(null);
-  const [codeSent, setCodeSent] = useState(false);
-  const [verifiedEmail, setVerifiedEmail] = useState(currentEmail ?? "");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    getRecoveryStatus()
-      .then((status) => { if (active) setEmailEnabled(Boolean(status.email_enabled)); })
-      .catch(() => { if (active) setEmailEnabled(false); });
-    return () => { active = false; };
-  }, []);
-
-  const sendCode = async () => {
-    setError("");
-    setMessage("");
-    try {
-      await requestRecoveryEmailUpdate(token, email);
-      setCodeSent(true);
-      setMessage("인증 코드를 보냈어요. 10분 안에 입력해 주세요.");
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  };
-
-  const verifyCode = async () => {
-    setError("");
-    try {
-      const result = await verifyRecoveryEmailUpdate(token, email, code);
-      setVerifiedEmail(result.recovery_email);
-      setMessage("복구 이메일을 등록했어요.");
-      setCodeSent(false);
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  };
-
-  return (
-    <section className="account-recovery-settings" aria-label="계정 복구 이메일">
-      <b>계정 복구 이메일</b>
-      <small>{verifiedEmail ? `등록됨 · ${verifiedEmail}` : "로그인 이메일을 잊었을 때 본인 확인에 사용해요."}</small>
-      {emailEnabled === false && <small role="alert">이메일 발송 설정이 완료되지 않았어요.</small>}
-      {!codeSent ? <>
-        <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="로그인 이메일과 다른 주소" aria-label="복구 이메일" />
-        <button type="button" disabled={emailEnabled !== true || !email.includes("@")} onClick={sendCode}>인증 코드 보내기</button>
-      </> : <>
-        <input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="6자리 인증 코드" aria-label="인증 코드" maxLength={6} />
-        <button type="button" disabled={!/^\d{6}$/.test(code)} onClick={verifyCode}>인증하고 등록</button>
-      </>}
-      {message && <small role="status">{message}</small>}
-      {error && <small role="alert">{error}</small>}
     </section>
   );
 }
@@ -196,7 +164,6 @@ function TasteSettings({ account, onClearLearning, clearingLearning }) {
           {clearingLearning ? "초기화 중…" : "기록 지우기"}
         </button>
       </div>
-      <RecoveryEmailSettings token={account.token} currentEmail={account.user.recovery_email_masked} />
     </>
   );
 }
@@ -251,7 +218,7 @@ function SavedLibrary({
   );
 }
 
-function RecoveryForm({ flow, onBack }) {
+function RecoveryForm({ onBack }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -275,10 +242,9 @@ function RecoveryForm({ flow, onBack }) {
     setError("");
     setMessage("");
     try {
-      if (flow === "username") await requestUsernameRecovery(email);
-      else await requestPasswordReset(email);
+      await requestPasswordReset(email);
       setSent(true);
-      setMessage("가입된 정보와 일치하면 인증 코드를 보냈어요. 메일함을 확인해 주세요.");
+      setMessage("해당 이메일로 가입한 계정이 있다면 인증 코드를 보냈어요. 받은편지함과 스팸함을 확인해 주세요.");
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -288,19 +254,17 @@ function RecoveryForm({ flow, onBack }) {
     event.preventDefault();
     setError("");
     try {
-      if (flow === "username") {
-        const result = await verifyUsernameRecovery(email, code);
-        setMessage(`로그인 이메일은 ${result.login_email} 입니다.`);
-        setComplete(true);
-      } else {
-        if (newPassword !== confirmPassword) {
-          setError("새 비밀번호가 서로 다릅니다.");
-          return;
-        }
-        await completePasswordReset(email, code, newPassword);
-        setMessage("비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.");
-        setComplete(true);
+      if (!/[A-Za-z]/.test(newPassword) || ![...newPassword].some((char) => PASSWORD_SPECIAL_CHARS.includes(char))) {
+        setError("새 비밀번호는 영문자와 특수문자를 포함해 8자 이상 입력해 주세요.");
+        return;
       }
+      if (newPassword !== confirmPassword) {
+        setError("새 비밀번호가 서로 다릅니다.");
+        return;
+      }
+      await completePasswordReset(email, code, newPassword);
+      setMessage("비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요.");
+      setComplete(true);
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -308,21 +272,22 @@ function RecoveryForm({ flow, onBack }) {
 
   return (
     <section className="account-recovery" aria-live="polite">
-      <h2>{flow === "username" ? "로그인 이메일 찾기" : "비밀번호 재설정"}</h2>
-      <p>{flow === "username" ? "가입할 때 등록한 복구 이메일로 본인 확인을 해요." : "가입한 이메일로 인증 코드를 보내드려요."}</p>
+      <h2>비밀번호 재설정</h2>
+      <p>회원가입 때 인증한 로그인 이메일로 재설정 코드를 보내드려요.</p>
       {emailEnabled === false && <p role="alert">이메일 발송 설정이 완료되지 않아 계정 복구를 사용할 수 없어요.</p>}
       {!complete && !sent && (
         <form onSubmit={requestCode}>
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={flow === "username" ? "복구 이메일" : "가입 이메일"} required />
+          <input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="가입할 때 사용한 이메일" required />
           <button type="submit" disabled={emailEnabled !== true}>인증 코드 받기</button>
         </form>
       )}
       {!complete && sent && (
         <form onSubmit={verifyCode}>
           <label>인증 코드<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} maxLength={6} required /></label>
-          {flow === "password" && <label>새 비밀번호<input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} maxLength={128} required /></label>}
-          {flow === "password" && <label>새 비밀번호 확인<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} maxLength={128} required /></label>}
-          <button type="submit">{flow === "username" ? "이메일 확인" : "비밀번호 변경"}</button>
+          <label>새 비밀번호<input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} maxLength={128} required /></label>
+          <small>영문자와 특수문자를 포함해 8자 이상 입력해 주세요.</small>
+          <label>새 비밀번호 확인<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} maxLength={128} required /></label>
+          <button type="submit">비밀번호 변경</button>
         </form>
       )}
       {message && <p role="status">{message}</p>}
@@ -429,9 +394,8 @@ function LoginForm({ accountMode, accountError, onSubmit, onSwitchMode, onRecove
       </>}
       {accountError && <p role="alert">{accountError}</p>}
       <button type="submit">{accountMode === "login" ? "로그인" : "가입하고 로그인"}</button>
-      {accountMode === "login" && <nav className="account-recovery-links" aria-label="계정 복구">
-        <button type="button" onClick={() => onRecovery("username")}>로그인 이메일 찾기</button>
-        <button type="button" onClick={() => onRecovery("password")}>비밀번호 재설정</button>
+      {accountMode === "login" && <nav className="account-recovery-links" aria-label="비밀번호 재설정">
+        <button type="button" onClick={() => onRecovery("password")}>비밀번호를 잊으셨나요?</button>
       </nav>}
       <button className="account-switch" type="button" onClick={onSwitchMode}>
         {accountMode === "login" ? "처음이신가요? 회원가입" : "이미 계정이 있어요"}
@@ -503,7 +467,7 @@ export default function AccountModal({
             </div>
           </form>
         ) : recoveryFlow ? (
-          <RecoveryForm flow={recoveryFlow} onBack={() => setRecoveryFlow(null)} />
+          <RecoveryForm onBack={() => setRecoveryFlow(null)} />
         ) : (
           <LoginForm accountMode={accountMode} accountError={accountError} onSubmit={onLogin} onSwitchMode={onSwitchMode} onRecovery={setRecoveryFlow} />
         )}

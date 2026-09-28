@@ -1,9 +1,8 @@
 """KOALA layered backend entrypoint.
 
-`core` contains the upstream MVP backend. `extensions` contains only the local
-overrides/additions.  Keeping both directories on the import path lets the
-extension modules override matching core modules while every other import
-continues to come from the untouched core.
+`core` owns the shared application, schemas, and database metadata. `extensions`
+contains the selected recommendation overrides and user-data routes. This file
+is the single entrypoint that assembles them for local and deployed runs.
 """
 
 from pathlib import Path
@@ -12,6 +11,7 @@ import os
 import sys
 
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect
 
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -19,31 +19,50 @@ CORE_DIR = BACKEND_DIR / "core"
 EXTENSIONS_DIR = BACKEND_DIR / "extensions"
 LLM_RUNTIME_DIR = CORE_DIR / "LLM" / "LLM_V1_4_FREEZE"
 
+# These modules are the only intentional Core replacements. Shared request
+# schemas and SQLAlchemy models stay in Core so both layers use one contract.
+EXTENSION_OVERRIDES = {
+    "conditions",
+    "course_routes",
+    "course_time_evaluator",
+    "llm_service",
+    "map_service",
+    "place_recommendation_service",
+    "place_routes",
+    "proactive_recommendation_service",
+    "region_recommendation_service",
+    "region_routes",
+    "route_travel_time",
+}
+EXTENSION_MODULES = EXTENSION_OVERRIDES | {
+    "audit_trace",
+    "extension_routes",
+    "extension_schemas",
+    "naver_image_service",
+    "personalization_service",
+    "popup_data_selector",
+    "user_data_routes",
+}
+
 if not (CORE_DIR / "main.py").exists():
     raise RuntimeError("backend/core/main.py를 찾을 수 없습니다.")
 
 # dotenv and relative data paths used by the upstream backend resolve from core.
 os.chdir(CORE_DIR)
 
-# Extensions take precedence; missing modules fall back to the upstream core.
+# Selected extension modules override the upstream Core modules; other imports
+# resolve from Core. This ordering is isolated to this single entrypoint.
 sys.path.insert(0, str(CORE_DIR))
 if (LLM_RUNTIME_DIR / "intent_parser.py").exists():
     sys.path.insert(0, str(LLM_RUNTIME_DIR))
 sys.path.insert(0, str(EXTENSIONS_DIR))
 
-# Pytest and development reloaders can import a core module before this
-# entrypoint.  Clear only names that have an extension counterpart so the
-# integrated app consistently uses the extension implementation instead of a
-# stale core module from ``sys.modules``.
-for extension_file in EXTENSIONS_DIR.glob("*.py"):
-    module_name = extension_file.stem
-    if module_name not in {"main", "extension_routes"}:
-        sys.modules.pop(module_name, None)
+# Development reloaders can import Core modules before this entrypoint.
+# Clear the explicit override list so module-cache state cannot select versions.
+for module_name in EXTENSION_MODULES:
+    sys.modules.pop(module_name, None)
 
 # Always load the upstream application entrypoint from ``core`` explicitly.
-# Extension modules still take precedence for ordinary imports through
-# ``sys.path``, but a legacy ``extensions/main.py`` must never replace the
-# current upstream app and pull in routes that no longer exist.
 core_main_spec = importlib.util.spec_from_file_location(
     "koala_core_main",
     CORE_DIR / "main.py",
@@ -53,13 +72,16 @@ if core_main_spec is None or core_main_spec.loader is None:
 core_main = importlib.util.module_from_spec(core_main_spec)
 core_main_spec.loader.exec_module(core_main)
 app = core_main.app
+
+for module_name in EXTENSION_OVERRIDES:
+    module = sys.modules.get(module_name)
+    expected_path = (EXTENSIONS_DIR / f"{module_name}.py").resolve()
+    if module and Path(module.__file__).resolve() != expected_path:
+        raise RuntimeError(
+            f"통합 서버가 잘못된 {module_name} 모듈을 불러왔습니다: {module.__file__}"
+        )
 from extension_routes import router as extension_router  # noqa: E402
-from user_data_routes import ensure_user_data_tables  # noqa: E402
-
-
-# Extension-owned schema is prepared before serving requests.  Running DDL
-# lazily inside authenticated requests can deadlock with MySQL metadata locks.
-ensure_user_data_tables()
+from database import engine  # noqa: E402
 
 
 def _cors_origins() -> list[str]:
@@ -90,6 +112,32 @@ app.add_middleware(
 )
 
 app.include_router(extension_router)
+
+
+def _verify_user_data_schema() -> None:
+    """Fail early with an actionable message when a deployment missed migrations."""
+    required_tables = {
+        "saved_courses",
+        "excluded_places",
+        "favorite_places",
+        "user_interactions",
+        "user_explored_regions",
+        "user_gamification_profiles",
+        "user_achievement_unlocks",
+        "user_gamification_events",
+    }
+    existing_tables = set(inspect(engine).get_table_names())
+    missing_tables = sorted(required_tables - existing_tables)
+    if missing_tables:
+        missing = ", ".join(missing_tables)
+        raise RuntimeError(
+            "KOALA 사용자 데이터 테이블이 없습니다: "
+            f"{missing}. 서버를 실행하기 전에 backend/core에서 "
+            "Alembic upgrade head를 적용해 주세요."
+        )
+
+
+_verify_user_data_schema()
 
 # The launcher owns the health/identity endpoint.  Replace the upstream root
 # response without changing ``core/main.py`` so operators can verify that the

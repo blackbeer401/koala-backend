@@ -44,6 +44,8 @@ import { useCourseCalculation } from "../hooks/useCourseCalculation";
 import { useCourseQuestProgress } from "../hooks/useCourseQuestProgress";
 import { useCoursePlaceViewModel } from "../hooks/useCoursePlaceViewModel";
 import { useAutoCourseSelection } from "../hooks/useAutoCourseSelection";
+import { explicitActivityDurationMinutes } from "../utils/timeIntent";
+import { useGamificationRewards } from "../hooks/useGamificationRewards";
 
 function RecommendationPage({ response, onBack, account, onOpenAccount, onAccountChange }) {
   const result = useMemo(() => normalizeRecommendation(response), [response]);
@@ -89,21 +91,6 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
   const [photoPreview, setPhotoPreview] = useState(null);
   const [adventureExperience, setAdventureExperience] = useState(null);
   const [mysteryRevealed, setMysteryRevealed] = useState(false);
-  const [gamificationCourseId, setGamificationCourseId] = useState(() => restoredCourse?.gamification_course_id ?? null);
-  const [gamificationCourseReady, setGamificationCourseReady] = useState(() => Boolean(restoredCourse?.gamification_course_id));
-  const [gamificationNotice, setGamificationNotice] = useState("");
-  const [questRewardResults, setQuestRewardResults] = useState({});
-  const [questsEnabled, setQuestsEnabled] = useState(false);
-  const gamificationNoticeTimerRef = useRef(null);
-  const completionRewardedRef = useRef(new Set());
-  const questRewardedRef = useRef(new Set());
-  const showGamificationNotice = (message) => {
-    setGamificationNotice(message);
-    window.clearTimeout(gamificationNoticeTimerRef.current);
-    gamificationNoticeTimerRef.current = window.setTimeout(() => setGamificationNotice(""), 5200);
-  };
-  useEffect(() => () => window.clearTimeout(gamificationNoticeTimerRef.current), []);
-
   useEffect(() => {
     let cancelled = false;
     if (!account?.token) {
@@ -389,7 +376,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
     contextAvailableTime: result.recommendationContext?.available_time_minutes,
     autoCourseDuration: response?._client_mode === "auto-course"
       ? response._client_selected_duration_minutes
-      : null,
+      : explicitActivityDurationMinutes(userMessage),
     selectedArea,
     courseResult,
     setSelectedPlaces,
@@ -531,7 +518,6 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
     visiblePlaces,
     adventureExperience,
     courseConfirmed,
-    questsEnabled,
     mysteryRevealed,
     guideStep,
     userKey: account?.user?.id ?? "guest",
@@ -731,47 +717,25 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
   const arrivalQuest = guidePreviousPlace
     ? questPlans.find((quest) => quest.placeIndex === guideStep - 1) ?? null
     : null;
-  useEffect(() => {
-    if (!guideIsComplete || !account?.token || !gamificationCourseReady || !gamificationCourseId) return;
-    const rewardKey = `${gamificationCourseId}:complete`;
-    if (completionRewardedRef.current.has(rewardKey)) return;
-    completionRewardedRef.current.add(rewardKey);
-    void awardGamificationEvent(account.token, {
-      event_type: "course_complete",
-      course_id: gamificationCourseId,
-    }).then((reward) => {
-      if (reward?.profile) onAccountChange?.({ ...account, gamification: reward.profile });
-      if (reward?.xp_awarded > 0) showGamificationNotice(reward.rank_up ? `등급 상승! ${reward.profile?.rank_name ?? "여행 등급"} · +${reward.xp_awarded} XP` : `코스 안내 완료 · +${reward.xp_awarded} XP`);
-    }).catch(() => {
-      completionRewardedRef.current.delete(rewardKey);
-      showGamificationNotice("코스 안내는 마쳤어요. 완료 보상은 서버 연결 후 반영돼요.");
-    });
-  }, [guideIsComplete, account?.token, gamificationCourseReady, gamificationCourseId]);
-
-  useEffect(() => {
-    if (!courseConfirmed || !gamificationCourseReady || !account?.token || !gamificationCourseId) return;
-    questPlans.forEach((quest) => {
-      const questStatus = questProgress[quest.id];
-      if (questStatus !== "done") return;
-      const rewardKey = `${gamificationCourseId}:quest:${quest.id}`;
-      if (questRewardedRef.current.has(rewardKey)) return;
-      questRewardedRef.current.add(rewardKey);
-      setQuestRewardResults((current) => ({ ...current, [quest.id]: "pending" }));
-      void awardGamificationEvent(account.token, {
-        event_type: "quest_complete",
-        course_id: gamificationCourseId,
-        quest_id: quest.id,
-      }).then((reward) => {
-        const rewardResult = reward?.already_completed ? "claimed" : reward?.xp_awarded ?? 0;
-        setQuestRewardResults((current) => ({ ...current, [quest.id]: rewardResult }));
-        if (reward?.profile) onAccountChange?.({ ...account, gamification: reward.profile });
-        if (reward?.xp_awarded > 0) showGamificationNotice(reward.rank_up ? `등급 상승! ${reward.profile?.rank_name ?? "여행 등급"} · +${reward.xp_awarded} XP` : `오늘의 퀘스트 완료 · +${reward.xp_awarded} XP`);
-      }).catch(() => {
-        setQuestRewardResults((current) => ({ ...current, [quest.id]: "error" }));
-        questRewardedRef.current.delete(rewardKey);
-      });
-    });
-  }, [courseConfirmed, gamificationCourseReady, account?.token, gamificationCourseId, questProgress, questPlans]);
+  const {
+    courseId: gamificationCourseId,
+    setCourseId: setGamificationCourseId,
+    courseReady: gamificationCourseReady,
+    setCourseReady: setGamificationCourseReady,
+    notice: gamificationNotice,
+    setNotice: setGamificationNotice,
+    questResults: questRewardResults,
+    showNotice: showGamificationNotice,
+    showRewardNotice,
+  } = useGamificationRewards({
+    initialCourseId: restoredCourse?.gamification_course_id,
+    account,
+    onAccountChange,
+    guideIsComplete,
+    courseConfirmed,
+    questPlans,
+    questProgress,
+  });
 
   const handleQuestProgressChange = (questId, nextStatus) => {
     updateQuestProgress(questId, nextStatus);
@@ -878,14 +842,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
         }).then((reward) => {
           setGamificationCourseReady(true);
           if (reward?.profile) onAccountChange?.({ ...account, gamification: reward.profile });
-          const newDistrictNames = reward?.newly_unlocked_districts?.map((district) => district.district_name) ?? [];
-          if (reward?.xp_awarded > 0) {
-            showGamificationNotice(reward.rank_up
-              ? `등급 상승! ${reward.profile?.rank_name ?? "여행 등급"} · +${reward.xp_awarded} XP`
-              : newDistrictNames.length
-                ? `${newDistrictNames.join("·")} 코스 지역 해제 · +${reward.xp_awarded} XP`
-                : `코스를 확정했어요 · +${reward.xp_awarded} XP`);
-          }
+          showRewardNotice(reward, "코스를 확정했어요");
         }).catch(() => {
           // 경험치 API가 잠시 실패해도 기존 서울 지역 기록은 남긴다.
           if (districts.size) void recordExploredRegions(account.token, { course_id: courseId, districts: [...districts.values()] }).catch(() => {});
@@ -1153,8 +1110,6 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                     arrivalQuestStatus={arrivalQuest ? questProgress[arrivalQuest.id] : null}
                     arrivalQuestReward={arrivalQuest ? questRewardResults[arrivalQuest.id] : null}
                     onQuestProgressChange={handleQuestProgressChange}
-                    questsEnabled={questsEnabled}
-                    onToggleQuests={setQuestsEnabled}
                     hasEndDestination={Boolean(result.mapContext?.end)}
                     setMysteryRevealed={setMysteryRevealed}
                     resetCourseSelection={resetCourseSelection}
@@ -1178,9 +1133,6 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                     onFocusStop={setFocusedStopIndex}
                     adventureMode={adventureExperience?.mode}
                     questPlans={questPlans}
-                    questsEnabled={questsEnabled}
-                    onToggleQuests={setQuestsEnabled}
-                    account={account}
                     onResetSelection={resetCourseSelection}
                     isAutoCourse={response?._client_mode === "auto-course"}
                     onReturnToAutoCourses={returnToAutoCourses}
@@ -1378,7 +1330,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                   selectedArea={selectedArea}
                   areas={rankingAreas}
                   recommendationContext={result.recommendationContext}
-                  initialAdventureMode={response?._client_adventure_mode}
+                  initialAdventureMode={["blind-course", "course"].includes(response?._client_adventure_mode) ? response._client_adventure_mode : null}
                   selectedIndex={selectedIndex}
                   displayArea={displayArea}
                   onPreviewArea={prepareAreaRoute}

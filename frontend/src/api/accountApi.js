@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './apiConfig'
+import { buildAchievementProgress, titlesForAchievements, TRAVEL_RANKS } from '../data/gamificationCatalog'
 // Real API/DB authentication is the safe default in every environment.
 // Opt into localStorage-only demo auth explicitly with VITE_AUTH_MODE=mock.
 const MOCK_AUTH = import.meta.env.VITE_AUTH_MODE === 'mock'
@@ -18,6 +19,40 @@ function read(key, fallback) { try { return JSON.parse(localStorage.getItem(key)
 function write(key, value) { localStorage.setItem(key, JSON.stringify(value)); return value }
 function mockUser(input = {}) { return read(USER_KEY, null) ?? write(USER_KEY, { id: 1, email: input.email ?? 'demo@koala.local', nickname: input.nickname ?? '코알라 여행자', created_at: new Date().toISOString() }) }
 function assertMockToken(token) { if (token !== MOCK_TOKEN) throw new Error('로그인이 필요해요.') }
+
+function mockGamificationSnapshot(profile = {}, metrics = {}) {
+  const totalXp = Number(profile.total_xp ?? 0)
+  const rankIndex = Math.max(0, TRAVEL_RANKS.findLastIndex(([, , threshold]) => totalXp >= threshold))
+  const [rankId, rankName, rankStart] = TRAVEL_RANKS[rankIndex]
+  const nextRank = TRAVEL_RANKS[rankIndex + 1]
+  const counts = {
+    districts: metrics.districts ?? profile.explored_district_count ?? 0,
+    courses: metrics.courses ?? profile.confirmed_course_count ?? 0,
+    guides: metrics.guides ?? profile.completed_course_count ?? 0,
+    quests: metrics.quests ?? profile.completed_quest_count ?? 0,
+  }
+  const achievements = buildAchievementProgress(counts)
+  const titles = titlesForAchievements(achievements)
+  const equippedTitle = titles.find((title) => title.id === profile.equipped_title?.id) ?? titles[0] ?? null
+  return {
+    ...profile,
+    explored_district_count: counts.districts,
+    confirmed_course_count: counts.courses,
+    completed_course_count: counts.guides,
+    completed_quest_count: counts.quests,
+    total_xp: totalXp,
+    rank_id: rankId,
+    rank_name: rankName,
+    rank_index: rankIndex + 1,
+    rank_count: TRAVEL_RANKS.length,
+    xp_into_rank: totalXp - rankStart,
+    next_rank_xp: nextRank?.[2] ?? null,
+    xp_to_next_rank: nextRank ? Math.max(0, nextRank[2] - totalXp) : 0,
+    equipped_title: equippedTitle,
+    unlocked_titles: titles,
+    achievements,
+  }
+}
 
 async function api(path, { method = 'GET', token, body } = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -79,16 +114,6 @@ export async function sendSignupEmailCode(email) {
   return api('/auth/signup/email-code', { method: 'POST', body: { email } })
 }
 
-export async function requestUsernameRecovery(email) {
-  if (MOCK_AUTH) throw new Error('임시 로그인에서는 계정 찾기를 사용할 수 없어요.')
-  return api('/auth/recovery/username', { method: 'POST', body: { email } })
-}
-
-export async function verifyUsernameRecovery(email, code) {
-  if (MOCK_AUTH) throw new Error('임시 로그인에서는 계정 찾기를 사용할 수 없어요.')
-  return api('/auth/recovery/username/verify', { method: 'POST', body: { email, code } })
-}
-
 export async function requestPasswordReset(email) {
   if (MOCK_AUTH) throw new Error('임시 로그인에서는 비밀번호 재설정을 사용할 수 없어요.')
   return api('/auth/recovery/password', { method: 'POST', body: { email } })
@@ -102,14 +127,6 @@ export async function completePasswordReset(email, code, newPassword) {
   })
 }
 
-export async function requestRecoveryEmailUpdate(token, email) {
-  return api('/users/me/recovery-email/request', { method: 'POST', token, body: { email } })
-}
-
-export async function verifyRecoveryEmailUpdate(token, email, code) {
-  return api('/users/me/recovery-email/verify', { method: 'POST', token, body: { email, code } })
-}
-
 export async function login(body) {
   if (MOCK_AUTH) {
     mockUser(body)
@@ -120,7 +137,7 @@ export async function login(body) {
     return await api('/auth/login', { method: 'POST', body })
   } catch (error) {
     if (error.status === 401) {
-      throw new Error('입력한 이메일 또는 비밀번호가 올바르지 않아요. 이메일을 잊으셨다면 ‘로그인 이메일 찾기’를 이용해 주세요.')
+      throw new Error('입력한 이메일 또는 비밀번호가 올바르지 않아요. 가입 이메일을 확인하거나 비밀번호 재설정을 이용해 주세요.')
     }
     throw error
   }
@@ -152,22 +169,16 @@ export async function getExploredRegions(token) {
 export async function getGamificationProfile(token) {
   if (!MOCK_AUTH) return api('/users/me/gamification', { token })
   assertMockToken(token)
-  return read(GAMIFICATION_KEY, {
+  const stored = read(GAMIFICATION_KEY, null)
+  const profile = mockGamificationSnapshot(stored ?? {
     total_xp: 0,
-    rank_id: 'travel_novice',
-    rank_name: '여행초보',
-    rank_index: 1,
-    rank_count: 5,
-    xp_into_rank: 0,
-    next_rank_xp: 100,
-    xp_to_next_rank: 100,
-    equipped_title: { id: 'travel_novice', name: '여행초보', kind: 'rank' },
-    unlocked_titles: [{ id: 'travel_novice', name: '여행초보', kind: 'rank' }],
-    achievements: [],
     explored_district_count: 0,
     confirmed_course_count: 0,
+    completed_course_count: 0,
     completed_quest_count: 0,
   })
+  write(GAMIFICATION_KEY, profile)
+  return profile
 }
 export async function updateGamificationTitle(token, titleId) {
   if (!MOCK_AUTH) return api('/users/me/gamification/title', { method: 'PUT', token, body: { title_id: titleId } })
@@ -218,12 +229,16 @@ export async function awardGamificationEvent(token, body) {
     : 0
   const questReward = dailyQuestCount < 2 ? (dailyQuest?.[2] === 'main' ? 10 : 5) : 0
   const awarded = (body.event_type === 'course_confirm' ? 10 : body.event_type === 'course_complete' ? 15 : dailyQuest ? questReward : 5) + newlyUnlockedDistricts.length * 20
-  const totalXp = profile.total_xp + awarded
-  const ranks = [['travel_novice','여행초보',0],['travel_intermediate','여행중수',100],['travel_expert','여행고수',300],['traveler','여행가',700],['travel_scholar','여행박사',1500]]
-  const rankIndex = Math.max(0, ranks.findLastIndex(([, , threshold]) => totalXp >= threshold))
-  const [rankId, rankName, rankStart] = ranks[rankIndex]
-  const rankTitles = ranks.slice(0, rankIndex + 1).map(([id, name]) => ({ id, name, kind: 'rank' }))
-  const updated = { ...profile, total_xp: totalXp, rank_id: rankId, rank_name: rankName, rank_index: rankIndex + 1, rank_count: 5, xp_into_rank: totalXp - rankStart, next_rank_xp: ranks[rankIndex + 1]?.[2] ?? null, xp_to_next_rank: ranks[rankIndex + 1] ? Math.max(0, ranks[rankIndex + 1][2] - totalXp) : 0, unlocked_titles: rankTitles, equipped_title: rankTitles.find((item) => item.id === profile.equipped_title?.id) ?? rankTitles[0], confirmed_course_count: profile.confirmed_course_count + (body.event_type === 'course_confirm' ? 1 : 0), completed_quest_count: profile.completed_quest_count + (body.event_type === 'quest_complete' ? 1 : 0) }
+  const updated = mockGamificationSnapshot({ ...profile, total_xp: profile.total_xp + awarded }, {
+    districts: profile.explored_district_count + newlyUnlockedDistricts.length,
+    courses: profile.confirmed_course_count + (body.event_type === 'course_confirm' ? 1 : 0),
+    guides: profile.completed_course_count + (body.event_type === 'course_complete' ? 1 : 0),
+    quests: profile.completed_quest_count + (body.event_type === 'quest_complete' ? 1 : 0),
+  })
+  const oldAchievementIds = new Set(profile.achievements.filter((item) => item.unlocked).map((item) => item.id))
+  const newlyUnlockedAchievements = updated.achievements
+    .filter((item) => item.unlocked && !oldAchievementIds.has(item.id))
+    .map(({ id, name, title_id, title_name }) => ({ id, name, title_id, title_name }))
   write(GAMIFICATION_KEY, updated)
   writeGAMIFICATIONSnapshot(updated)
   if (body.event_type === 'course_confirm' && body.districts?.length) {
@@ -234,10 +249,10 @@ export async function awardGamificationEvent(token, body) {
     write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
     const unlocked = newlyUnlockedDistricts.map((district) => ({ district_code: district.district_code, district_name: regions.find((region) => region.district_code === district.district_code)?.district_name }))
     try { sessionStorage.setItem('koala-region-unlock-flash', JSON.stringify({ at: Date.now(), districts: unlocked })) } catch { /* animation state is optional */ }
-    return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: unlocked, profile: updated, regions }
+    return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: unlocked, newly_unlocked_achievements: newlyUnlockedAchievements, profile: updated, regions }
   }
   write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
-  return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: [], profile: updated }
+  return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: [], newly_unlocked_achievements: newlyUnlockedAchievements, profile: updated }
 }
 function writeGAMIFICATIONSnapshot(profile) {
   window.dispatchEvent(new CustomEvent('koala-gamification-updated', { detail: profile }))

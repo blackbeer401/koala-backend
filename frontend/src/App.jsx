@@ -9,8 +9,8 @@ import { getGamificationProfile, getMe, getPersonalizationProfile, getPreference
 const RecommendationPage = lazy(() => import('./pages/RecommendationPage'))
 
 function App() {
-  // 새로고침은 새 세션으로 시작한다. 저장된 자동추천 화면을 다시 마운트하면
-  // 실제 경로 검증 요청이 재실행되므로 결과 화면을 자동 복원하지 않는다.
+  // 새로고침 후에는 추천 결과 대신 홈으로 복원한다. 저장된 자동추천 화면을
+  // 다시 마운트하면 실제 경로 검증 요청이 재실행될 수 있기 때문이다.
   const [result, setResult] = useState(null)
   const [view, setView] = useState('welcome')
   // This flag controls whether the in-progress result stays mounted during account screens.
@@ -92,6 +92,8 @@ function App() {
       .then(async (user) => {
         if (cancelled) return
         setAccount((current) => ({ ...current, token, user, restoring: false }))
+        // 로그인은 유지하되 진행 중이던 추천 결과는 자동으로 다시 열지 않는다.
+        setView('home')
         const [preferencesResult, personalizationResult, gamificationResult] = await Promise.allSettled([
           getPreferences(token),
           getPersonalizationProfile(token),

@@ -1,8 +1,13 @@
 # KOALA extension settings
 
-The upstream backend under `backend/core` stays unchanged. Optional extension
-settings belong in `backend/core/.env`, because `backend/run.py` starts the
-upstream application from that directory.
+Recommendation overrides and user-data routes live here. Shared request
+schemas and SQLAlchemy models live under `backend/core`, so the integrated
+application uses one canonical contract and one Alembic metadata registry.
+Optional extension settings belong in `backend/core/.env`, because
+`backend/run.py` starts the integrated application from that directory.
+
+Run the application only through `backend/run.py` (`run:app`). Apply database
+changes from `backend/core` with `alembic upgrade head` before starting it.
 
 To enable place images through NAVER API HUB Image Search, add these server-side variables:
 

@@ -45,13 +45,33 @@ function stableHash(value) {
   return hash >>> 0;
 }
 
-function currentLocalDayKey(date = new Date()) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
+function seoulDateParts(date = new Date()) {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(date)
+      .filter(({ type }) => type !== "literal")
+      .map(({ type, value }) => [type, value]),
+  );
 }
 
-export function questForPlace(place, dayKey = currentLocalDayKey(), variation = 0) {
+function currentSeoulDayKey(date = new Date()) {
+  const { year, month, day } = seoulDateParts(date);
+  return `${year}-${month}-${day}`;
+}
+
+/** The app's daily missions roll over at Korean midnight, independent of device timezone. */
+export function nextSeoulMidnightTimestamp(date = new Date()) {
+  const { year, month, day } = seoulDateParts(date);
+  // Seoul uses UTC+09:00 without daylight-saving changes.
+  return Date.UTC(Number(year), Number(month) - 1, Number(day) + 1) - 9 * 60 * 60 * 1000;
+}
+
+export function questForPlace(place, dayKey = currentSeoulDayKey(), variation = 0) {
   const quests = QUESTS_BY_CATEGORY[place?.category] ?? [
     { title: "이곳에서 새로운 점 하나 발견하기", detail: "장소를 둘러보고 평소와 다른 점이나 마음에 드는 점을 하나 찾아요.", minutes: 5, difficulty: "가벼움" },
   ];
@@ -65,7 +85,7 @@ function hashKey(value) {
   return stableHash(String(value ?? "guest")).toString(36);
 }
 
-export function getDailyQuestStorageKeys(userKey = "guest", dayKey = currentLocalDayKey()) {
+export function getDailyQuestStorageKeys(userKey = "guest", dayKey = currentSeoulDayKey()) {
   const owner = hashKey(userKey);
   // v2 assigns optional missions to a confirmed route stop, unlike the old
   // standalone quest-mode plan. Keep legacy plans from appearing on new flows.

@@ -16,6 +16,7 @@ export default function CourseQuestList({
       <div className="course-quest-heading">
         <div><small>오늘의 퀘스트</small><b>{completedCount} / {plans.length} 완료</b></div>
         <p>이 코스에서 랜덤 제안 · 원할 때만 참여 · 약 {estimatedMinutes}분</p>
+        <p className="course-quest-honesty-note">완료 여부는 직접 체크해요. 완료로 표시하면 XP를 받아요.</p>
         <div className="course-quest-progress" aria-label={`${completedCount}개 완료`}>
           <span style={{ width: `${(completedCount / plans.length) * 100}%` }} />
         </div>

@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -231,5 +231,127 @@ class UserActivityPreference(Base):
         server_default=func.current_timestamp(),
         server_onupdate=func.current_timestamp(),
     )
+
+
+# 계정 개인화·지역 탐험·보상 데이터는 공용 metadata 아래에서 관리한다.
+class SavedCourse(Base):
+    __tablename__ = "saved_courses"
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    area_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    course_data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class ExcludedPlace(Base):
+    __tablename__ = "excluded_places"
+    __table_args__ = (UniqueConstraint("user_id", "place_key", name="uq_excluded_place_user_key"),)
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    place_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    place_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class FavoritePlace(Base):
+    __tablename__ = "favorite_places"
+    __table_args__ = (UniqueConstraint("user_id", "place_key", name="uq_favorite_place_user_key"),)
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    place_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    place_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    place_data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class UserInteraction(Base):
+    __tablename__ = "user_interactions"
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    place_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    place_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    context_hour: Mapped[int | None] = mapped_column(TINYINT(unsigned=True), nullable=True)
+    context_day: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    context_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp(), index=True)
+
+
+class UserExploredRegion(Base):
+    __tablename__ = "user_explored_regions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "course_id", "district_code", name="uq_explored_region_course"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    course_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    district_code: Mapped[str] = mapped_column(String(5), nullable=False, index=True)
+    district_name: Mapped[str] = mapped_column(String(20), nullable=False)
+    place_names: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp(), index=True)
+
+
+class GamificationProfile(Base):
+    __tablename__ = "user_gamification_profiles"
+
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    total_xp: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    equipped_title_id: Mapped[str] = mapped_column(String(50), nullable=False, default="", server_default="")
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp(), server_onupdate=func.current_timestamp()
+    )
+
+
+class UserAchievementUnlock(Base):
+    __tablename__ = "user_achievement_unlocks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "achievement_id", name="uq_user_achievement_unlock"),
+        Index("ix_user_achievement_unlocks_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    achievement_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    unlocked_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp())
+
+
+class GamificationEvent(Base):
+    __tablename__ = "user_gamification_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_key", name="uq_gamification_event_user_key"),
+        Index("ix_gamification_event_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    event_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    xp_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    context_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.current_timestamp(), index=True)
 
 

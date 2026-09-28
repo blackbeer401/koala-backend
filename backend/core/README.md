@@ -450,7 +450,7 @@ INFEASIBLE
 * Bearer Token 기반 사용자 조회
 * SMTP 이메일 OTP를 이용한 계정 찾기와 비밀번호 재설정
 
-복구 이메일 기능은 `users.recovery_email`, `users.token_version`, `account_recovery_codes`를 사용합니다. 기존 DB에는 아래 마이그레이션을 적용해야 하며, 발송 계정 정보는 `backend/core/.env`에 설정합니다.
+인증·개인화·저장 코스·서울 탐험·경험치 데이터 구조는 Alembic으로 관리합니다. 새 DB와 기존 DB 모두 `alembic upgrade head`로 최신 버전을 적용해야 합니다. 사용자 데이터 테이블을 서버 시작 중 자동 생성하지 않습니다.
 
 ```powershell
 Set-Location backend/core
@@ -465,6 +465,9 @@ Set-Location backend/core
 * `user_preferences`
 * `activity_categories`
 * `user_activity_preferences`
+* `saved_courses`, `favorite_places`, `excluded_places`
+* `user_interactions`, `user_explored_regions`
+* `user_gamification_profiles`, `user_gamification_events`, `user_achievement_unlocks`
 
 ### 통합 앱의 실제 개인화 동작
 
@@ -477,7 +480,7 @@ Set-Location backend/core
 * 개인화 데이터 조회가 실패해도 지역 추천은 비개인화 방식으로 계속 동작합니다.
 * `GET /users/me/personalization`은 집계 프로필을 제공하고 `DELETE /users/me/interactions`는 학습 이력만 초기화합니다. 직접 설정한 취향과 저장 목록은 유지합니다.
 
-로그인하지 않은 사용자는 핵심 추천을 계속 사용할 수 있지만, 계정별 선호 저장과 행동 기반 개인화는 적용되지 않습니다. `backend/core/main.py` 단독 실행은 Core 앱이며, 위 사용자 데이터 확장 라우터를 포함하는 기본 운영 진입점은 `backend/run.py`의 `run:app`입니다.
+로그인하지 않은 사용자는 핵심 추천을 계속 사용할 수 있지만, 계정별 선호 저장과 행동 기반 개인화는 적용되지 않습니다. `backend/run.py`의 `run:app`만 개발·운영 실행 진입점으로 사용합니다. `backend/core/main.py`를 직접 실행하면 확장 라우터가 빠집니다. 통합 서버는 시작할 때 사용자 데이터 테이블 존재를 확인하고, 마이그레이션 누락 시 적용 명령을 안내하며 종료합니다.
 
 ---
 
@@ -720,16 +723,20 @@ python -m scripts.seed_activity_categories
 기존 `koala_schema.sql`로 생성한 DB를 사용할 경우 현재 schema와 일치하는지 확인한 뒤 필요하면:
 
 ```powershell
-alembic stamp head
+alembic stamp 20260928_0002
+alembic upgrade head
 python -m scripts.seed_activity_categories
 ```
+
+위 `stamp`는 core와 계정 복구 스키마가 이미 적용된 DB에만 사용합니다. 스키마 상태가 불명확하면 백업 후 먼저 점검하세요.
 
 ---
 
 # 서버 실행
 
 ```powershell
-uvicorn main:app --reload
+Set-Location backend
+..\.venv\Scripts\python.exe -m uvicorn run:app --reload
 ```
 
 기본 주소:

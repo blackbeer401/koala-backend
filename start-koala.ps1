@@ -11,10 +11,23 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontendRoot 'package.json'))) {
   throw "frontend\package.json을 찾을 수 없습니다."
 }
 
-# 기존 프로젝트 가상환경을 우선 사용하고, 없으면 PATH의 python을 사용합니다.
-$pythonExe = 'python'
-$legacyPython = 'C:\Users\Admin\p2\backend\MBCA-P2-mvp2-integrated\.audit-venv\Scripts\python.exe'
-if (Test-Path -LiteralPath $legacyPython) { $pythonExe = $legacyPython }
+# 저장소 가상환경을 우선 사용하고, 없으면 PATH의 Python을 찾습니다.
+$pythonExe = Join-Path $mvpRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $pythonExe)) {
+  $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+  if (-not $pythonCommand) { throw '저장소 가상환경이나 PATH에서 Python을 찾지 못했습니다.' }
+  $pythonExe = $pythonCommand.Source
+}
+
+# 서버를 내리기 전에 DB 연결과 안전한 스키마 업데이트를 먼저 확인합니다.
+$coreRoot = Join-Path $backendRoot 'core'
+Push-Location $coreRoot
+try {
+  & $pythonExe -m alembic upgrade head
+  if ($LASTEXITCODE -ne 0) { throw 'DB 마이그레이션에 실패했습니다. 기존 서버는 유지했습니다.' }
+} finally {
+  Pop-Location
+}
 
 function Stop-KoalaListener([int]$port) {
   # Get-NetTCPConnection은 일부 일반 사용자 환경에서 접근 거부가 발생한다.

@@ -186,7 +186,11 @@ function HomePage({
         if (favorites.status === "fulfilled") setFavoritePlaces(favorites.value);
         if (excluded.status === "fulfilled") setExcludedPlaces(excluded.value);
         if (regions.status === "fulfilled") setExploredRegions(regions.value);
-        if (gamification.status === "fulfilled" && (account.gamification?.total_xp !== gamification.value.total_xp || account.gamification?.equipped_title?.id !== gamification.value.equipped_title?.id)) {
+        if (gamification.status === "fulfilled" && (
+          account.gamification?.total_xp !== gamification.value.total_xp
+          || account.gamification?.equipped_title?.id !== gamification.value.equipped_title?.id
+          || JSON.stringify(account.gamification?.achievements ?? []) !== JSON.stringify(gamification.value.achievements ?? [])
+        )) {
           onAccountChange({ ...account, gamification: gamification.value });
         }
         const coreFailure = [courses, favorites, excluded, regions].find((result) => result.status === "rejected");
@@ -354,7 +358,6 @@ function HomePage({
     const adventurePrompt = {
       "blind-course": "목적지를 미리 공개하지 않는 블라인드 코스",
       course: "뜻밖의 랜덤 코스",
-      quest: "오늘의 작은 퀘스트가 포함된 코스",
     }[pendingAdventureMode];
     const prompt = adventurePrompt
       ? `${activeLocationName}에서 ${durationText} 동안 즐길 수 있는 ${adventurePrompt}를 추천해줘.`
@@ -646,14 +649,13 @@ function HomePage({
           </button>
           <section className="home-adventure-store" aria-label="색다른 추천">
             <div className="home-adventure-head">
-              <span><b>색다른 추천</b><small>평소와 다른 하루를 골라보세요</small></span>
+              <span><b>색다른 추천</b><small>미스터리 가이드와 랜덤 코스를 골라보세요</small></span>
               <em>옆으로 보기 →</em>
             </div>
-            <div className="home-adventure-cards">
+            <div className="home-adventure-cards home-adventure-cards--two">
               {[
                 ["blind-course", "🎁", "미스터리 가이드", "목적지는 도착하면 공개"],
                 ["course", "🎲", "랜덤 코스", "완성된 코스를 바로 받기"],
-                ["quest", "✓", "오늘의 퀘스트", "코스마다 작은 미션"],
               ].map(([mode, icon, title, copy]) => (
                 <button key={mode} type="button" onClick={() => { setPendingAdventureMode(mode); setTimePickerOpen(true); }}>
                   <i>{icon}</i><b>{title}</b><small>{copy}</small>

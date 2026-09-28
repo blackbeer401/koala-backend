@@ -122,10 +122,6 @@
 .account-recovery [role="status"] { color:#287149; }
 .account-recovery button[type="submit"] { min-height:44px; border:0; border-radius:13px; color:#fff; background:#287bf2; font:inherit; font-weight:800; }
 .account-panel button:disabled { cursor:not-allowed; opacity:.55; }
-.account-recovery-settings { display:grid; gap:8px; padding:14px; border:1px solid #dce8f7; border-radius:15px; background:#f7faff; }
-.account-recovery-settings b { color:#334e70; font-size:13px; }
-.account-recovery-settings small { color:#657c98; font-size:11px; line-height:1.45; }
-.account-recovery-settings button { min-height:38px; border:1px solid #bfd5f1; border-radius:11px; color:#2868be; background:#fff; font:inherit; font-size:12px; font-weight:800; }
 .quick-course-section { display:none; }
 .transport-current-trigger { display:none; }
 .preference-activities { display:flex; flex-wrap:wrap; gap:6px; margin:0; padding:0; border:0; }
@@ -946,6 +942,7 @@ body .analysis-page .analysis-steps span i {
 .home-adventure-head b { color:#17406f; font-size:13px; }
 .home-adventure-head small,.home-adventure-head em { color:#8397af; font-size:10px; font-style:normal; }
 .home-adventure-cards { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(132px,42%); gap:9px; overflow-x:auto; padding:1px 1px 7px; scroll-snap-type:x mandatory; scrollbar-width:none; }
+.home-adventure-cards--two { grid-auto-flow:row; grid-auto-columns:auto; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; scroll-snap-type:none; }
 .home-adventure-cards::-webkit-scrollbar { display:none; }
 .home-adventure-cards button { display:grid; gap:5px; min-height:105px; padding:14px 12px; border:1px solid #d4e2f6; border-radius:16px; color:#183e6d; background:#fff; box-shadow:0 5px 16px rgba(36,88,153,.07); text-align:left; scroll-snap-align:start; cursor:pointer; }
 .home-adventure-cards i { display:grid; width:31px; height:31px; place-items:center; border-radius:10px; background:#edf5ff; font-size:16px; font-style:normal; }
@@ -1090,6 +1087,7 @@ body .analysis-page .analysis-steps span i {
 .course-quest-list .course-quest-heading > div:first-child small { color:#287bf2; font-size:11px; font-weight:900; }
 .course-quest-list .course-quest-heading > div:first-child b { color:#28537f; font-size:13px; }
 .course-quest-list .course-quest-heading > p { margin:0; color:#6e849d; font-size:11px; line-height:1.4; }
+.course-quest-list .course-quest-heading > .course-quest-honesty-note { color:#8293a7; font-size:10px; }
 .course-quest-list .course-quest-progress { height:6px; overflow:hidden; border-radius:999px; background:#e4edf8; }
 .course-quest-list .course-quest-progress span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#58a0f4,#287bf2); transition:width 180ms ease; }
 .course-quest-list .course-quest-heading > .course-quest-finish { padding:9px 10px; border-radius:10px; color:#216343; background:#eaf8ef; font-weight:800; }
@@ -1130,6 +1128,9 @@ body .analysis-page .analysis-steps span i {
 .travel-progress-card.is-loading { display:block; color:#7589a2; font-size:12px; }
 .travel-progress-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .travel-progress-heading > div { display:grid; gap:3px; }
+.travel-progress-heading .travel-rank-identity { display:flex; align-items:center; gap:10px; }
+.travel-rank-identity > span:last-child { display:grid; gap:3px; }
+.travel-rank-badge { display:block; width:64px; height:64px; flex:none; object-fit:contain; filter:drop-shadow(0 4px 5px rgba(30,73,126,.14)); }
 .travel-progress-heading > div small { color:#7590b0; font-size:9px; font-weight:900; letter-spacing:.08em; }
 .travel-progress-heading > div b { color:#1c4672; font-size:18px; }
 .travel-progress-heading > strong { color:#2876df; font-size:15px; }
@@ -1140,12 +1141,24 @@ body .analysis-page .analysis-steps span i {
 .travel-progress-meta b { color:#2869bb; font-size:11px; }
 .travel-reward-rules { color:#8294a8; font-size:9px; line-height:1.55; }
 .travel-title-picker { display:grid; gap:5px; color:#456789; font-size:11px; font-weight:800; }
+.travel-title-picker small { color:#8799ae; font-size:10px; font-weight:600; }
 .travel-title-picker select { min-height:40px; padding:0 10px; border:1px solid #d7e6f8; border-radius:10px; color:#1d416a; background:#fff; font:inherit; }
-.travel-achievements { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
-.travel-achievements > b { grid-column:1/-1; color:#395b7c; font-size:11px; }
-.travel-achievements > b small { margin-left:5px; color:#8ca0b7; font-size:10px; }
-.travel-achievements > span { overflow:hidden; padding:6px 7px; border:1px solid #e2eaf4; border-radius:9px; color:#98a5b5; background:#f7f9fc; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
-.travel-achievements > span.is-unlocked { border-color:#cfe2fb; color:#2868b8; background:#edf6ff; font-weight:800; }
+.travel-achievements { display:grid; gap:7px; }
+.travel-achievements-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.travel-achievements-heading > b { color:#395b7c; font-size:11px; }
+.travel-achievements-heading > b small { margin-left:5px; color:#8ca0b7; font-size:10px; }
+.travel-achievements-toggle { min-height:34px; padding:0 12px; border:1px solid #d5e5f8; border-radius:10px; color:#286bc2; background:#f4f8ff; font:inherit; font-size:11px; font-weight:850; cursor:pointer; }
+.travel-achievements-list { display:grid; max-height:min(36dvh,300px); min-height:0; gap:7px; padding:2px 5px 2px 1px; overflow-y:auto; overscroll-behavior:contain; scrollbar-color:#a9c9f2 transparent; scrollbar-width:thin; }
+.travel-achievements-list::-webkit-scrollbar { width:5px; }
+.travel-achievements-list::-webkit-scrollbar-thumb { border-radius:999px; background:#a9c9f2; }
+.travel-achievement { display:grid; gap:3px; padding:8px 10px; border:1px solid #e2eaf4; border-radius:10px; color:#8999ac; background:#f8fafc; }
+.travel-achievement > div { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
+.travel-achievement > div strong { color:inherit; }
+.travel-achievement > div span,.travel-achievement > small { font-size:10px; }
+.travel-achievement > small { color:#8799ae; line-height:1.35; }
+.travel-achievement .travel-achievement-title { color:#7187a2; }
+.travel-achievement.is-unlocked { border-color:#cfe2fb; color:#2868b8; background:#edf6ff; }
+.travel-achievement.is-unlocked > div strong { color:#2868b8; }
 .travel-progress-error { margin:0; color:#be4545; font-size:11px; }
 .account-button { display:grid; justify-items:center; gap:1px; }
 .account-button-name { line-height:1.2; }
@@ -1273,5 +1286,6 @@ body .analysis-page .analysis-steps span i {
   .preference-activity-name i { width:30px; height:30px; font-size:15px; }
   .account-panel .preference-activities .preference-activity-card select { max-width:116px; min-height:40px; font-size:11px; }
   .account-panel .learning-controls { align-items:stretch; }
+  .travel-achievements-list { max-height:min(34dvh,260px); }
 }
 .area-congestion-source { display:block; margin:3px 0 0 3px; color:#8a99af; font-size:10px; font-weight:600; }

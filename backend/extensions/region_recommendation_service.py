@@ -475,12 +475,12 @@ def recommend_regions(
     time_window = calculate_time_window(
         resolved_datetimes
     )
-    # 총 가용시간은 자동 코스에서 직접 고른 시간 또는 명시적인 시작/종료
-    # 시각으로 계산한다. 희망 체류시간은 총 코스 예산으로 대체하지 않는다.
+    # 시작/종료 시각이 없을 때는 사용자가 명시한 활동시간을 코스 예산으로 쓴다.
+    # 시간대와 활동시간을 둘 다 적었다면 실제 시간대의 길이를 우선한다.
     final_available_time = (
         request.auto_course_duration_minutes
         if request.auto_course
-        else time_window["time_window_minutes"]
+        else time_window["time_window_minutes"] or explicit_duration
     )
     # 별도의 마감시간이 있을 때만 desired duration을 최소 체류 요구로 쓴다.
     # 같은 180분을 총 예산과 최소 체류시간에 동시에 적용하면 이동시간 때문에

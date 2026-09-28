@@ -716,6 +716,15 @@ class PasswordResetVerifyRequest(BaseModel):
     def normalize_email(cls, value):
         return value.strip().lower() if isinstance(value, str) else value
 
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str):
+        if not any(char in string.ascii_letters for char in value):
+            raise ValueError("비밀번호에 영문자를 하나 이상 포함해 주세요.")
+        if not any(char in string.punctuation for char in value):
+            raise ValueError("비밀번호에 특수문자를 하나 이상 포함해 주세요.")
+        return value
+
 
 class AccessTokenResponse(BaseModel):
     access_token: str
@@ -773,3 +782,120 @@ class UserPreferencesResponse(BaseModel):
         "car",
     ] | None
     activity_preferences: list[ActivityPreferenceResponse]
+
+
+# 사용자 데이터 확장 API의 요청·응답 모델도 공용 계약 파일에서 관리한다.
+class UserPreferenceUpdate(BaseModel):
+    space_preference: Literal["indoor", "outdoor", "any"] | None = None
+    transport_mode: Literal["auto", "public_transit", "walk", "car"] | None = None
+    activity_preferences: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("activity_preferences")
+    @classmethod
+    def validate_activity_preferences(cls, value):
+        allowed = {"food", "cafe", "walk", "culture", "entertainment", "shopping", "drink"}
+        if any(code not in allowed or level < 1 or level > 5 for code, level in value.items()):
+            raise ValueError("활동 선호도는 지원 활동별 1~5 값이어야 합니다.")
+        return value
+
+
+class UserPreferenceResponse(UserPreferenceUpdate):
+    user_id: int
+
+
+class SavedCourseCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    area_name: str | None = Field(default=None, max_length=100)
+    course_data: dict
+
+
+class SavedCourseResponse(SavedCourseCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    created_at: datetime
+
+
+class ExcludedPlaceCreate(BaseModel):
+    place_key: str = Field(min_length=1, max_length=255)
+    place_name: str = Field(min_length=1, max_length=255)
+
+
+class ExcludedPlaceResponse(ExcludedPlaceCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    created_at: datetime
+
+
+class FavoritePlaceCreate(BaseModel):
+    place_key: str = Field(min_length=1, max_length=255)
+    place_name: str = Field(min_length=1, max_length=255)
+    category: str | None = Field(default=None, max_length=50)
+    place_data: dict = Field(default_factory=dict)
+
+
+class FavoritePlaceResponse(FavoritePlaceCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    created_at: datetime
+
+
+class UserInteractionCreate(BaseModel):
+    event_type: Literal[
+        "place_view", "place_select", "favorite", "like", "dislike", "hide",
+        "course_confirm", "course_open",
+    ]
+    place_key: str | None = Field(default=None, max_length=255)
+    place_name: str | None = Field(default=None, max_length=255)
+    category: str | None = Field(default=None, max_length=50)
+    context_hour: int | None = Field(default=None, ge=0, le=23)
+    context_day: Literal["weekday", "weekend"] | None = None
+    context_data: dict = Field(default_factory=dict)
+
+
+class PersonalizationProfileResponse(BaseModel):
+    activity_preferences: dict[str, int] = Field(default_factory=dict)
+    context_activity_preferences: dict[str, dict[str, int]] = Field(default_factory=dict)
+    interaction_count: int = 0
+
+
+class ExploredRegionEntry(BaseModel):
+    district_code: Literal[
+        "11110", "11140", "11170", "11200", "11215", "11230", "11260", "11290",
+        "11305", "11320", "11350", "11380", "11410", "11440", "11470", "11500",
+        "11530", "11545", "11560", "11590", "11620", "11650", "11680", "11710", "11740",
+    ]
+    place_names: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ExploredRegionsCreate(BaseModel):
+    course_id: str = Field(min_length=1, max_length=80)
+    districts: list[ExploredRegionEntry] = Field(min_length=1, max_length=25)
+
+
+class ExploredRegionSummary(BaseModel):
+    district_code: str
+    district_name: str
+    course_count: int
+    last_used_at: datetime
+    place_names: list[str] = Field(default_factory=list)
+
+
+class GamificationEventCreate(BaseModel):
+    event_type: Literal["course_confirm", "course_complete", "quest_complete"]
+    course_id: str = Field(min_length=1, max_length=80)
+    quest_id: str | None = Field(default=None, min_length=1, max_length=120)
+    districts: list[ExploredRegionEntry] = Field(default_factory=list, max_length=25)
+
+    @field_validator("quest_id")
+    @classmethod
+    def quest_id_required_for_quest_reward(cls, value, info):
+        if info.data.get("event_type") == "quest_complete" and not value:
+            raise ValueError("퀘스트 완료 보상에는 퀘스트 정보가 필요해요.")
+        return value
+
+
+class GamificationTitleUpdate(BaseModel):
+    title_id: str = Field(min_length=1, max_length=50)

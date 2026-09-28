@@ -1,5 +1,6 @@
 from typing import Annotated, Any, Literal
 from datetime import date, datetime
+import string
 
 from pydantic import (
     BaseModel,
@@ -660,8 +661,9 @@ class SignupRequest(BaseModel):
         max_length=255,
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
     )
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=128)
     nickname: str = Field(min_length=1, max_length=50)
+    email_verification_code: str = Field(pattern=r"^\d{6}$")
 
     @field_validator("email", "nickname", mode="before")
     @classmethod
@@ -673,6 +675,15 @@ class SignupRequest(BaseModel):
     def normalize_email(cls, value: str):
         return value.lower()
 
+    @field_validator("password")
+    @classmethod
+    def validate_signup_password(cls, value: str):
+        if not any(char in string.ascii_letters for char in value):
+            raise ValueError("비밀번호에 영문자를 하나 이상 포함해 주세요.")
+        if not any(char in string.punctuation for char in value):
+            raise ValueError("비밀번호에 특수문자를 하나 이상 포함해 주세요.")
+        return value
+
 
 class LoginRequest(BaseModel):
     email: str = Field(
@@ -681,6 +692,30 @@ class LoginRequest(BaseModel):
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
     )
     password: str = Field(min_length=1)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class RecoveryEmailRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class UsernameRecoveryVerifyRequest(RecoveryEmailRequest):
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class PasswordResetVerifyRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -698,6 +733,7 @@ class UserResponse(BaseModel):
 
     id: int
     email: str
+    recovery_email_masked: str | None = None
     nickname: str
     created_at: datetime
 
@@ -806,6 +842,8 @@ class UserInteractionCreate(BaseModel):
         "place_view",
         "place_select",
         "favorite",
+        "like",
+        "dislike",
         "hide",
         "course_confirm",
         "course_open",
@@ -822,3 +860,43 @@ class PersonalizationProfileResponse(BaseModel):
     activity_preferences: dict[str, int] = Field(default_factory=dict)
     context_activity_preferences: dict[str, dict[str, int]] = Field(default_factory=dict)
     interaction_count: int = 0
+
+
+class ExploredRegionEntry(BaseModel):
+    district_code: Literal[
+        "11110", "11140", "11170", "11200", "11215", "11230", "11260", "11290",
+        "11305", "11320", "11350", "11380", "11410", "11440", "11470", "11500",
+        "11530", "11545", "11560", "11590", "11620", "11650", "11680", "11710", "11740",
+    ]
+    place_names: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ExploredRegionsCreate(BaseModel):
+    course_id: str = Field(min_length=1, max_length=80)
+    districts: list[ExploredRegionEntry] = Field(min_length=1, max_length=25)
+
+
+class ExploredRegionSummary(BaseModel):
+    district_code: str
+    district_name: str
+    course_count: int
+    last_used_at: datetime
+    place_names: list[str] = Field(default_factory=list)
+
+
+class GamificationEventCreate(BaseModel):
+    event_type: Literal["course_confirm", "course_complete", "quest_complete"]
+    course_id: str = Field(min_length=1, max_length=80)
+    quest_id: str | None = Field(default=None, min_length=1, max_length=120)
+    districts: list[ExploredRegionEntry] = Field(default_factory=list, max_length=25)
+
+    @field_validator("quest_id")
+    @classmethod
+    def quest_id_required_for_quest_reward(cls, value, info):
+        if info.data.get("event_type") == "quest_complete" and not value:
+            raise ValueError("퀘스트 완료 보상에는 퀘스트 정보가 필요해요.")
+        return value
+
+
+class GamificationTitleUpdate(BaseModel):
+    title_id: str = Field(min_length=1, max_length=50)

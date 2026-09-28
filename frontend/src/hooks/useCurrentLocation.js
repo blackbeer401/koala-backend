@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { API_BASE_URL } from '../api/apiConfig'
+import { reverseGeocodeLocation } from '../api/locationApi'
+import {
+  hasFastGpsFix,
+  hasUsableGpsFix,
+  normalizeGpsFix,
+} from '../utils/locationAccuracy'
+
+// Give high-accuracy GPS a short window, then accept only the bounded coarse fallback.
+const GPS_FIX_WAIT_MS = 8000
 
 export function useCurrentLocation() {
   const [location, setLocation] = useState(null)
@@ -7,6 +15,7 @@ export function useCurrentLocation() {
   const [addressStatus, setAddressStatus] = useState('idle')
   const [status, setStatus] = useState('idle')
   const watchIdRef = useRef(null)
+  const fixTimeoutRef = useRef(null)
   const addressRequestRef = useRef(null)
   const generationRef = useRef(0)
 
@@ -20,6 +29,10 @@ export function useCurrentLocation() {
   const cancelRequests = useCallback(() => {
     generationRef.current += 1
     stopWatching()
+    if (fixTimeoutRef.current !== null) {
+      window.clearTimeout(fixTimeoutRef.current)
+      fixTimeoutRef.current = null
+    }
     addressRequestRef.current?.abort()
     addressRequestRef.current = null
   }, [stopWatching])
@@ -45,49 +58,88 @@ export function useCurrentLocation() {
     const generation = generationRef.current
     setStatus('loading')
     let settled = false
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      ({ coords }) => {
-        if (settled || generation !== generationRef.current) return
-        settled = true
-        const nextLocation = {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
-          updatedAt: Date.now(),
-        }
-        setLocation(nextLocation)
-        setAddress(null)
-        setAddressStatus('loading')
-        setStatus('success')
-        stopWatching()
-        if (typeof onSuccess === 'function') onSuccess(nextLocation)
+    let bestLocation = null
 
-        // Ignore late address responses after location is cleared or requested again.
-        const addressController = new AbortController()
-        addressRequestRef.current = addressController
-        const addressTimeout = window.setTimeout(() => addressController.abort(), 8000)
-        fetch(`${API_BASE_URL}/reverse-geocode?latitude=${encodeURIComponent(coords.latitude)}&longitude=${encodeURIComponent(coords.longitude)}`, { signal: addressController.signal })
-          .then((response) => {
-            if (!response.ok) throw new Error('주소 조회 실패')
-            return response.json()
-          })
-          .then((result) => {
-            if (generation !== generationRef.current) return
-            setAddress(result)
-            setAddressStatus(result?.road_address || result?.jibun_address || result?.display_name ? 'success' : 'unavailable')
-          })
-          .catch(() => { if (generation === generationRef.current) setAddressStatus('unavailable') })
-          .finally(() => window.clearTimeout(addressTimeout))
-      },
-      (error) => {
-        if (settled || generation !== generationRef.current) return
-        settled = true
-        setStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable')
-        stopWatching()
-        if (typeof onFailure === 'function') onFailure(error)
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 15000 },
-    )
+    const fail = (error) => {
+      if (settled || generation !== generationRef.current) return
+      settled = true
+      if (fixTimeoutRef.current !== null) {
+        window.clearTimeout(fixTimeoutRef.current)
+        fixTimeoutRef.current = null
+      }
+      setStatus('unavailable')
+      if (error?.code === error?.PERMISSION_DENIED) setStatus('denied')
+      stopWatching()
+      if (typeof onFailure === 'function') onFailure(error)
+    }
+
+    const acceptLocation = (nextLocation) => {
+      if (settled || generation !== generationRef.current) return
+      settled = true
+      if (fixTimeoutRef.current !== null) {
+        window.clearTimeout(fixTimeoutRef.current)
+        fixTimeoutRef.current = null
+      }
+      setLocation(nextLocation)
+      setAddress(null)
+      setAddressStatus('loading')
+      setStatus('success')
+      stopWatching()
+      if (typeof onSuccess === 'function') onSuccess(nextLocation)
+
+      // Ignore late address responses after location is cleared or requested again.
+      const addressController = new AbortController()
+      addressRequestRef.current = addressController
+      const addressTimeout = window.setTimeout(() => addressController.abort(), 8000)
+      reverseGeocodeLocation(nextLocation, { signal: addressController.signal })
+        .then((result) => {
+          if (generation !== generationRef.current) return
+          setAddress(result)
+          setAddressStatus(result?.road_address || result?.jibun_address || result?.display_name ? 'success' : 'unavailable')
+        })
+        .catch(() => { if (generation === generationRef.current) setAddressStatus('unavailable') })
+        .finally(() => window.clearTimeout(addressTimeout))
+    }
+
+    try {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        ({ coords }) => {
+          if (settled || generation !== generationRef.current) return
+          const nextLocation = normalizeGpsFix(coords)
+          if (!nextLocation) return
+          if (!bestLocation || nextLocation.accuracy < bestLocation.accuracy) {
+            bestLocation = nextLocation
+          }
+          if (hasFastGpsFix(nextLocation)) {
+            acceptLocation(nextLocation)
+            return
+          }
+          setStatus('low_accuracy')
+        },
+        (error) => {
+          if (settled || generation !== generationRef.current) return
+          if (error.code === error.PERMISSION_DENIED || error.code === error.POSITION_UNAVAILABLE) {
+            fail(error)
+            return
+          }
+          setStatus('low_accuracy')
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+      )
+    } catch (error) {
+      // Some browsers throw synchronously when location access is blocked by
+      // permissions or document policy; route that through the same fallback.
+      fail(error)
+      return
+    }
+
+    fixTimeoutRef.current = window.setTimeout(() => {
+      if (hasUsableGpsFix(bestLocation)) {
+        acceptLocation(bestLocation)
+        return
+      }
+      fail({ code: 'LOW_ACCURACY' })
+    }, GPS_FIX_WAIT_MS)
   }, [stopWatching, cancelRequests])
 
   return { location, address, addressStatus, status, requestLocation, clearLocation }

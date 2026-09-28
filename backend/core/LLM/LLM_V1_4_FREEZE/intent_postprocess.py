@@ -27,6 +27,18 @@ _AVAILABILITY_RE = re.compile(
 
 _DURATION_MENTION_RE = re.compile(_DURATION_CORE)
 
+# Explicit activity words take precedence over an incomplete model extraction.
+# Include the common misspelling "까페" so meal + cafe requests keep both stops.
+_EXPLICIT_ACTIVITY_PATTERNS = (
+    ("food", re.compile(r"밥|식사|먹(?:고|기|으)|맛집|음식")),
+    ("cafe", re.compile(r"카페|까페|커피|디저트|차\s*마시")),
+    ("culture", re.compile(r"전시|미술관|박물관|공연|연극|문화|갤러리")),
+    ("walk", re.compile(r"산책|걷|걸(?:을|으)|공원")),
+    ("entertainment", re.compile(r"놀(?:고|기)|오락|게임|영화|즐길")),
+    ("shopping", re.compile(r"쇼핑|구경|시장|백화점")),
+    ("drink", re.compile(r"술|맥주|와인|한잔|포차|바\b")),
+)
+
 _EXPLICIT_WALK_TRANSPORT_RE = re.compile(
     r"걸어서|도보(?:로)?|걸어\s*(?:가|갈|이동)|걷(?:는|기)\s*거리"
 )
@@ -143,6 +155,34 @@ def postprocess_intent(user_input: str, runtime_context: dict, predicted: dict):
 
     out = copy.deepcopy(predicted)
     changes = []
+
+    # Keep every explicitly requested activity, even if the model returned only
+    # the first one. Sort by the wording so downstream recommendations preserve
+    # the requested order (for example, food first and cafe second).
+    explicit_activities = []
+    for activity, pattern in _EXPLICIT_ACTIVITY_PATTERNS:
+        match = pattern.search(user_input)
+        if not match:
+            continue
+        # Don't add an activity the user explicitly rejects, as in "카페 말고 밥".
+        nearby_tail = user_input[match.end():match.end() + 12]
+        if re.match(r"\s*(?:말고|말자|싫|안\s*(?:가|먹|하)|아니)", nearby_tail):
+            continue
+        explicit_activities.append((match.start(), activity))
+    explicit_activities.sort(key=lambda item: item[0])
+    current_activities = list(out.get("activities") or [])
+    if explicit_activities:
+        merged_activities = list(dict.fromkeys(
+            [activity for _, activity in explicit_activities] + current_activities
+        ))
+        if merged_activities != current_activities:
+            changes.append({
+                "field": "activities",
+                "from": current_activities,
+                "to": merged_activities,
+                "reason": "preserve_explicit_activities",
+            })
+            out["activities"] = merged_activities
 
     # Rule A: "N시간 시간 있어/비어/여유 있어" is availability, not desired duration.
     match = _AVAILABILITY_RE.search(user_input)

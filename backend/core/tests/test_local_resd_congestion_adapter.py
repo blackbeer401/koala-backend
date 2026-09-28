@@ -169,6 +169,26 @@ def test_provider_and_population_loader_share_hour_floored_issue_time():
     assert result["horizon"] == 1
 
 
+def test_population_history_loads_once_for_multiple_region_predictions():
+    loader_calls = []
+
+    def loader(issue_time):
+        loader_calls.append(issue_time)
+        return pd.DataFrame({"value": [1]})
+
+    provider = FakeProvider()
+    adapter = D4DirectCongestionAdapter(
+        provider=provider,
+        population_loader=loader,
+    )
+
+    adapter.predict("11110515", ISSUE_TIME, ISSUE_TIME + timedelta(hours=1))
+    adapter.predict("11110516", ISSUE_TIME, ISSUE_TIME + timedelta(hours=2))
+
+    assert len(loader_calls) == 1
+    assert provider.calls == 2
+
+
 def test_aware_issue_time_keeps_seoul_clock_time_and_becomes_naive_for_model():
     issue_time = pd.Timestamp("2026-09-17T15:28:00+09:00")
     expected_arrival_time = pd.Timestamp("2026-09-17T15:49:00+09:00")

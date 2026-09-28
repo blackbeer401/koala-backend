@@ -107,6 +107,8 @@ export function requestPlaces({
     budget_max: recommendationContext?.budget_max ?? null,
     budget_preference: recommendationContext?.budget_preference ?? null,
     space_preference: recommendationContext?.space_preference ?? null,
+    activity_preferences:
+      recommendationContext?.activity_preferences ?? {},
   });
 }
 

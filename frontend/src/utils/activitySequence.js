@@ -9,7 +9,7 @@ export function hasOrderedActivitySequence(sequence) {
 
 const ACTIVITY_PATTERNS = {
   food: /(밥|식사|먹(?:고|기|으)|맛집|음식|점심|저녁|아침)/,
-  cafe: /(카페|커피|디저트|차\s*마시)/,
+  cafe: /(카페|까페|커피|디저트|차\s*마시)/,
   culture: /(전시|미술관|박물관|공연|연극|문화|갤러리)/,
   walk: /(산책|걷|걸(?:을|으)|공원)/,
   entertainment: /(놀(?:고|기)|오락|게임|영화|즐길)/,

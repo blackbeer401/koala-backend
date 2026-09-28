@@ -61,7 +61,7 @@ _RELATIVE_TIME_RE = re.compile(
 # Fallback cues are intentionally high precision, not comprehensive.
 _ACTIVITY_RULES = (
     ("food", re.compile(r"밥|맛집|식사|끼니|먹을\s*(?:것|거)|먹고\s*싶|먹으러")),
-    ("cafe", re.compile(r"카페|커피")),
+    ("cafe", re.compile(r"카페|까페|커피")),
     ("walk", re.compile(r"산책|걷기|걷고\s*싶|걸으며")),
     ("culture", re.compile(r"전시|박물관|미술관|공연")),
     ("entertainment", re.compile(r"방탈출|보드게임|오락실|게임하러|놀이시설")),

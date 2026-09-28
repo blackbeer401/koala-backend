@@ -34,7 +34,7 @@ if not JWT_SECRET_KEY:
 
 
 # 로그인 성공 시 사용자에게 전달할 JWT Access Token 생성
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, token_version: int = 0) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
     )
@@ -43,6 +43,7 @@ def create_access_token(user_id: int) -> str:
     payload = {
         "sub": str(user_id),
         "exp": expire,
+        "ver": int(token_version),
     }
 
     return jwt.encode(
@@ -54,12 +55,7 @@ def create_access_token(user_id: int) -> str:
 # JWT Access Token을 해석해서 사용자 ID를 반환
 def decode_access_token(token: str) -> int:
     # 서명과 만료시간을 검증하고 필수 claim(sub, exp)이 있는지도 확인한다.
-    payload = jwt.decode(
-        token,
-        JWT_SECRET_KEY,
-        algorithms=[JWT_ALGORITHM],
-        options={"require": ["sub", "exp"]},
-    )
+    payload = decode_access_token_claims(token)
 
     user_id = int(payload["sub"])
 
@@ -67,3 +63,19 @@ def decode_access_token(token: str) -> int:
         raise ValueError("JWT sub는 양의 사용자 ID여야 합니다.")
 
     return user_id
+
+
+def decode_access_token_claims(token: str) -> dict:
+    """Decode a token and normalize claims used by auth dependencies."""
+    payload = jwt.decode(
+        token,
+        JWT_SECRET_KEY,
+        algorithms=[JWT_ALGORITHM],
+        options={"require": ["sub", "exp"]},
+    )
+
+    payload["sub"] = int(payload["sub"])
+    payload["ver"] = int(payload.get("ver", 0))
+    if payload["sub"] <= 0 or payload["ver"] < 0:
+        raise ValueError("JWT 사용자 정보가 올바르지 않습니다.")
+    return payload

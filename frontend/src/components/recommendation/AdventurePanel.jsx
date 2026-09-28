@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   requestAdventure,
   requestAdventureCourse,
   requestBlindAdventure,
   requestBlindAdventureCourse,
-  requestRandomQuest,
   requestSeoulGacha,
   revealBlindAdventure,
   revealBlindAdventureCourse,
@@ -35,11 +34,6 @@ const modeCopy = {
     eyebrow: "랜덤 코스",
     title: "고민 없이 코스 하나를 바로 골랐어요",
     description: "현재 위치와 남은 시간에 맞춘 두 장소예요. 마음에 들지 않으면 한 번 더 뽑을 수 있어요.",
-  },
-  quest: {
-    eyebrow: "오늘의 퀘스트",
-    title: "오늘 할 작은 도전 하나",
-    description: "장소를 고르는 기능이 아니라, 오늘의 외출에 재미를 더하는 간단한 미션이에요.",
   },
 };
 
@@ -71,7 +65,6 @@ export default function AdventurePanel({
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
-  const [questDone, setQuestDone] = useState(false);
   const initialModeHandled = useRef(false);
   const recentSignatures = useRef(
     (() => {
@@ -102,16 +95,16 @@ export default function AdventurePanel({
   );
 
   const ready = Boolean(area && context.start_location && Number.isFinite(context.available_time_minutes) && context.available_time_minutes > 0);
-  const body = ready
-    ? { area: areaPayload(area), recommendation_context: context }
-    : null;
+  const body = useMemo(
+    () => (ready ? { area: areaPayload(area), recommendation_context: context } : null),
+    [ready, area, context],
+  );
   const focusedMode = initialMode && modeCopy[initialMode] ? initialMode : null;
 
-  const run = async (kind) => {
+  const run = useCallback(async (kind) => {
     if (!body || loading) return;
     setLoading(kind);
     setError("");
-    if (kind === "quest") setQuestDone(false);
     try {
       if (kind === "single" || kind === "course") {
         const request =
@@ -160,19 +153,6 @@ export default function AdventurePanel({
         }
         setResult({ kind, data: blindData, blind: true });
       }
-      if (kind === "quest") {
-        const quest = await requestRandomQuest(context.activities[0] ?? "walk");
-        if (focusedMode === "quest") {
-          const course = await requestAdventureCourse(body);
-          await onUsePlaces?.(course.places ?? [], {
-            mode: "quest",
-            autoConfirm: true,
-            quest: quest.quest,
-          });
-          return;
-        }
-        setResult({ kind, data: quest });
-      }
       if (kind === "seoul") {
         const candidates = areas.filter(
           (item) => item?.latitude != null && item?.longitude != null,
@@ -191,14 +171,14 @@ export default function AdventurePanel({
     } finally {
       setLoading("");
     }
-  };
+  }, [body, loading, focusedMode, onUsePlaces, areas, context]);
 
   useEffect(() => {
     if (!ready || !initialMode || initialModeHandled.current) return;
     initialModeHandled.current = true;
     setOpen(true);
     void run(initialMode);
-  }, [ready, initialMode]);
+  }, [ready, initialMode, run]);
 
   const reveal = async () => {
     setLoading("reveal");
@@ -281,9 +261,6 @@ export default function AdventurePanel({
                 <button type="button" onClick={() => run("blind-course")}>
                   코스 전체를 비밀로
                 </button>
-                <button type="button" onClick={() => run("quest")}>
-                  오늘의 퀘스트
-                </button>
                 <button type="button" onClick={() => run("seoul")}>
                   서울 어디든 떠나기
                 </button>
@@ -300,20 +277,6 @@ export default function AdventurePanel({
                 <button type="button" onClick={reveal} disabled={Boolean(loading)}>
                   장소 공개하기
                 </button>
-              </div>
-            )}
-            {result?.kind === "quest" && (
-              <div className={`adventure-result adventure-quest${questDone ? " is-complete" : ""}`}>
-                <b>{questDone ? "퀘스트 완료!" : "오늘의 작은 퀘스트"}</b>
-                <span>{result.data.quest}</span>
-                <div className="adventure-result-actions">
-                  <button type="button" onClick={() => setQuestDone((current) => !current)}>
-                    {questDone ? "완료 취소" : "완료했어요 ✓"}
-                  </button>
-                  <button type="button" className="is-secondary" onClick={() => run("quest")} disabled={Boolean(loading)}>
-                    다른 퀘스트
-                  </button>
-                </div>
               </div>
             )}
             {result?.kind === "seoul" && (

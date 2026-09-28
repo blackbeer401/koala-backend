@@ -61,7 +61,10 @@ class FakeSession:
 
     @classmethod
     def _list_param(cls, statement):
-        return next(value for value in cls._params(statement) if isinstance(value, list))
+        return next(
+            (value for value in cls._params(statement) if isinstance(value, list)),
+            None,
+        )
 
     def get(self, model, identity):
         return self.users.get(identity) if model is User else None
@@ -85,11 +88,12 @@ class FakeSession:
             )
         if model is UserActivityPreference:
             user_id = self._single_int(statement)
-            activity_ids = set(self._list_param(statement))
+            activity_ids = self._list_param(statement)
             return _Result(
                 item
                 for item in self.activity_preferences
-                if item.user_id == user_id and item.activity_id in activity_ids
+                if item.user_id == user_id
+                and (activity_ids is None or item.activity_id in activity_ids)
             )
         raise AssertionError(f"unexpected scalars query: {statement}")
 
@@ -109,6 +113,9 @@ class FakeSession:
             self.activity_preferences.append(item)
         else:
             raise AssertionError(f"unexpected add: {item}")
+
+    def delete(self, item):
+        self.activity_preferences.remove(item)
 
     def commit(self):
         self.commit_count += 1
@@ -259,7 +266,7 @@ class UserPreferencesApiTest(unittest.TestCase):
         self.assertEqual(len(self.db.activity_preferences), 1)
         self.assertEqual(self.db.commit_count, 2)
 
-    def test_partial_activity_update_preserves_other_activities(self):
+    def test_activity_list_replaces_existing_activity_preferences(self):
         self.request(
             "PUT",
             {
@@ -281,10 +288,7 @@ class UserPreferencesApiTest(unittest.TestCase):
 
         self.assertEqual(
             response.json()["activity_preferences"],
-            [
-                {"activity": "food", "preference_level": 2},
-                {"activity": "walk", "preference_level": 5},
-            ],
+            [{"activity": "walk", "preference_level": 5}],
         )
 
     def test_explicit_null_clears_basic_preferences(self):
@@ -304,7 +308,7 @@ class UserPreferencesApiTest(unittest.TestCase):
         self.assertIsNone(response.json()["space_preference"])
         self.assertIsNone(response.json()["transport_mode"])
 
-    def test_empty_activity_list_and_omitted_fields_preserve_values(self):
+    def test_empty_activity_list_clears_activities_but_omitted_fields_preserve_basics(self):
         self.db.preferences.append(
             UserPreference(
                 user_id=self.user.id,
@@ -324,10 +328,7 @@ class UserPreferencesApiTest(unittest.TestCase):
 
         self.assertEqual(response.json()["space_preference"], "indoor")
         self.assertEqual(response.json()["transport_mode"], "walk")
-        self.assertEqual(
-            response.json()["activity_preferences"],
-            [{"activity": "food", "preference_level": 4}],
-        )
+        self.assertEqual(response.json()["activity_preferences"], [])
 
     def test_authentication_failures(self):
         missing = self.request("GET", headers={})

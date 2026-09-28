@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
+import { FAST_GPS_ACCURACY_METERS } from "../utils/locationAccuracy";
+import { searchStartLocation } from "../api/locationApi";
 import koalaPeeking from "../assets/images/koala-peeking.webp";
 import TimeWheel from "../components/common/TimeWheel";
 import PromptHelpDialog from "../components/home/PromptHelpDialog";
+import AccountModal from "../components/home/AccountModal";
 import {
   addAppointmentTime,
   needsAppointmentTimeClarification,
@@ -10,23 +13,27 @@ import {
 } from "../utils/timeIntent";
 import {
   deleteSavedCourse,
+  clearInteractionHistory,
   getExcludedPlaces,
+  getExploredRegions,
   getFavoritePlaces,
+  getGamificationProfile,
   getMe,
   getPersonalizationProfile,
   getPreferences,
   getSavedCourses,
-  isMockAuthEnabled,
   login,
   recordInteraction,
   removeFavoritePlace,
   restoreExcludedPlace,
   signup,
+  updateGamificationTitle,
   updatePreferences,
 } from "../api/accountApi";
 
 const COURSE_HOURS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 const COURSE_MINUTES = [0, 10, 20, 30, 40, 50];
+const EMPTY_PREFERENCES = { transport_mode: null, space_preference: null, activity_preferences: {} };
 
 function HomePage({
   isOpen,
@@ -43,16 +50,23 @@ function HomePage({
   const [accountMode, setAccountMode] = useState("login");
   const [accountSection, setAccountSection] = useState("taste");
   const [accountError, setAccountError] = useState("");
+  const [clearingLearning, setClearingLearning] = useState(false);
   const [promptHelpOpen, setPromptHelpOpen] = useState(false);
   const [savedCourses, setSavedCourses] = useState([]);
   const [favoritePlaces, setFavoritePlaces] = useState([]);
   const [excludedPlaces, setExcludedPlaces] = useState([]);
+  const [exploredRegions, setExploredRegions] = useState([]);
+  const [gamificationError, setGamificationError] = useState("");
   const [savedCourseNotice, setSavedCourseNotice] = useState("");
   const [pendingQuickCourse, setPendingQuickCourse] = useState(null);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
   const [courseHours, setCourseHours] = useState(3);
   const [courseMinutes, setCourseMinutes] = useState(0);
   const [quickCourseError, setQuickCourseError] = useState("");
+  const [startLocationQuery, setStartLocationQuery] = useState("");
+  const [manualLocation, setManualLocation] = useState(null);
+  const [locationSearchError, setLocationSearchError] = useState("");
+  const [searchingLocation, setSearchingLocation] = useState(false);
   const [pendingAdventureMode, setPendingAdventureMode] = useState(null);
   const [appointmentPromptOpen, setAppointmentPromptOpen] = useState(false);
   const [pendingAppointmentMessage, setPendingAppointmentMessage] = useState("");
@@ -89,6 +103,42 @@ function HomePage({
     requestLocation,
     clearLocation,
   } = useCurrentLocation();
+  const activeLocation = manualLocation ?? location;
+  const activeLocationName = manualLocation?.name ?? "현재 위치";
+  const canChooseManualStart =
+    manualLocation || ["denied", "unavailable", "unsupported", "loading", "low_accuracy"].includes(status);
+
+  const handleSearchStartLocation = async (event) => {
+    event.preventDefault();
+    const query = startLocationQuery.trim();
+    if (query.length < 2 || searchingLocation) return;
+    setSearchingLocation(true);
+    setLocationSearchError("");
+    try {
+      const result = await searchStartLocation(query);
+      // 직접 출발지를 고르면 진행 중 GPS watcher를 중단해 늦게 도착한 좌표가
+      // 사용자의 선택을 덮어쓰거나 자동 추천이 두 번 실행되지 않게 한다.
+      clearLocation();
+      setManualLocation(result);
+      setStartLocationQuery(result.name);
+      setLocationSearchError("");
+      setQuickCourseError("");
+      if (pendingQuickCourse) {
+        const prompt = pendingQuickCourse.prompt.replace(/^현재 위치에서/, `${result.name}에서`);
+        void submitQuickCourse({ ...pendingQuickCourse, prompt }, result);
+      }
+    } catch (searchError) {
+      setLocationSearchError(searchError.message);
+    } finally {
+      setSearchingLocation(false);
+    }
+  };
+
+  const clearManualLocation = () => {
+    setManualLocation(null);
+    setStartLocationQuery("");
+    setLocationSearchError("");
+  };
 
   const autoCourse = useMemo(() => {
     const preferences = account?.preferences?.activity_preferences ?? {};
@@ -121,20 +171,51 @@ function HomePage({
       setSavedCourses([]);
       setFavoritePlaces([]);
       setExcludedPlaces([]);
+      setExploredRegions([]);
       return;
     }
-    Promise.all([
+    Promise.allSettled([
       getSavedCourses(account.token),
       getFavoritePlaces(account.token),
       getExcludedPlaces(account.token),
+      getExploredRegions(account.token),
+      getGamificationProfile(account.token),
     ])
-      .then(([courses, favorites, excluded]) => {
-        setSavedCourses(courses);
-        setFavoritePlaces(favorites);
-        setExcludedPlaces(excluded);
+      .then(([courses, favorites, excluded, regions, gamification]) => {
+        if (courses.status === "fulfilled") setSavedCourses(courses.value);
+        if (favorites.status === "fulfilled") setFavoritePlaces(favorites.value);
+        if (excluded.status === "fulfilled") setExcludedPlaces(excluded.value);
+        if (regions.status === "fulfilled") setExploredRegions(regions.value);
+        if (gamification.status === "fulfilled" && (account.gamification?.total_xp !== gamification.value.total_xp || account.gamification?.equipped_title?.id !== gamification.value.equipped_title?.id)) {
+          onAccountChange({ ...account, gamification: gamification.value });
+        }
+        const coreFailure = [courses, favorites, excluded, regions].find((result) => result.status === "rejected");
+        if (coreFailure) setAccountError(coreFailure.reason?.message ?? "계정 정보를 불러오지 못했어요.");
       })
       .catch((requestError) => setAccountError(requestError.message));
   }, [account?.token]);
+
+  useEffect(() => {
+    const refreshGamification = (event) => onAccountChange({ ...account, gamification: event.detail });
+    window.addEventListener("koala-gamification-updated", refreshGamification);
+    return () => window.removeEventListener("koala-gamification-updated", refreshGamification);
+  }, [account, onAccountChange]);
+
+  const equipTitle = async (titleId) => {
+    setGamificationError("");
+    try {
+      const gamification = await updateGamificationTitle(account.token, titleId);
+      onAccountChange({ ...account, gamification });
+    } catch (error) {
+      setGamificationError(error.message || "칭호를 바꾸지 못했어요.");
+    }
+  };
+
+  useEffect(() => {
+    const refreshExploredRegions = (event) => setExploredRegions(event.detail ?? []);
+    window.addEventListener("koala-explored-regions-updated", refreshExploredRegions);
+    return () => window.removeEventListener("koala-explored-regions-updated", refreshExploredRegions);
+  }, []);
 
   const removeSavedCourse = async (courseId) => {
     try {
@@ -216,7 +297,7 @@ function HomePage({
     setQuickCourseError("");
     quickCourseRequestRef.current = true;
     setPendingQuickCourse(course);
-    if (!location) {
+    if (!activeLocation) {
       requestLocation(
         (nextLocation) => {
           void submitQuickCourse(course, nextLocation);
@@ -226,14 +307,17 @@ function HomePage({
           setPendingQuickCourse(null);
           setQuickCourseError(
             locationError?.code === locationError?.PERMISSION_DENIED
-              ? "자동 코스는 현재 위치가 필요해요. 브라우저의 위치 권한을 허용한 뒤 다시 눌러주세요."
-              : "현재 위치를 확인하지 못했어요. 위치 버튼을 다시 누르거나 원하는 지역을 문장으로 입력해 주세요.",
+              ? "위치 권한이 없어도 괜찮아요. 아래에서 역이나 동네를 검색해 출발지를 선택해 주세요."
+              : locationError?.code === "LOW_ACCURACY"
+                ? "GPS 신호가 약해 정확한 위치를 확인하지 못했어요. 실외에서 다시 시도하거나 원하는 지역을 직접 입력해 주세요."
+              : "현재 위치를 확인하지 못했어요. 아래에서 역이나 동네를 검색해 출발지를 선택해 주세요.",
           );
         },
       );
       return;
     }
-    void submitQuickCourse(course, location);
+    const prompt = course.prompt.replace(/^현재 위치에서/, `${activeLocationName}에서`);
+    void submitQuickCourse({ ...course, prompt }, activeLocation);
   };
 
   const handleSubmit = (event) => {
@@ -245,7 +329,7 @@ function HomePage({
       setAppointmentPromptOpen(true);
       return;
     }
-    onRecommend({ message, location, preferences: account?.preferences });
+    onRecommend({ message, location: activeLocation, preferences: account?.preferences });
   };
 
   const submitAppointmentTime = (hour) => {
@@ -254,7 +338,7 @@ function HomePage({
     setAppointmentPromptOpen(false);
     onRecommend({
       message: clarifiedMessage,
-      location,
+      location: activeLocation,
       preferences: account?.preferences,
     });
   };
@@ -273,8 +357,8 @@ function HomePage({
       quest: "오늘의 작은 퀘스트가 포함된 코스",
     }[pendingAdventureMode];
     const prompt = adventurePrompt
-      ? `현재 위치에서 ${durationText} 동안 즐길 수 있는 ${adventurePrompt}를 추천해줘.`
-      : `현재 위치에서 지금 운영 중인 장소를 이용해 ${durationText} 동안 즐길 수 있는 서로 다른 분위기의 코스 후보를 추천해줘.`;
+      ? `${activeLocationName}에서 ${durationText} 동안 즐길 수 있는 ${adventurePrompt}를 추천해줘.`
+      : `${activeLocationName}에서 지금 운영 중인 장소를 이용해 ${durationText} 동안 즐길 수 있는 서로 다른 분위기의 코스 후보를 추천해줘.`;
     setTimePickerOpen(false);
     startQuickCourse({
       ...autoCourse,
@@ -298,6 +382,7 @@ function HomePage({
           email: form.get("email"),
           password: form.get("password"),
           nickname: form.get("nickname"),
+          email_verification_code: form.get("email_verification_code"),
         });
       }
       const session = await login({
@@ -305,12 +390,22 @@ function HomePage({
         password: form.get("password"),
       });
       localStorage.setItem("koala-token", session.access_token);
-      const [user, preferences, personalization] = await Promise.all([
-        getMe(session.access_token),
+      // 사용자 인증을 먼저 확정한다. 취향·개인화 API 장애가 로그인 자체를
+      // 실패로 보이게 하지 않도록 부가 데이터는 실패 시 기본값으로 둔다.
+      const user = await getMe(session.access_token);
+      onAccountChange({ token: session.access_token, user, preferences: EMPTY_PREFERENCES, personalization: null, gamification: null });
+      const [preferencesResult, personalizationResult, gamificationResult] = await Promise.allSettled([
         getPreferences(session.access_token),
         getPersonalizationProfile(session.access_token),
+        getGamificationProfile(session.access_token),
       ]);
-      onAccountChange({ token: session.access_token, user, preferences, personalization });
+      onAccountChange({
+        token: session.access_token,
+        user,
+        preferences: preferencesResult.status === "fulfilled" ? preferencesResult.value : EMPTY_PREFERENCES,
+        personalization: personalizationResult.status === "fulfilled" ? personalizationResult.value : null,
+        gamification: gamificationResult.status === "fulfilled" ? gamificationResult.value : null,
+      });
       setAccountSection("taste");
       setAccountOpen(wasSignup);
     } catch (requestError) {
@@ -326,7 +421,9 @@ function HomePage({
         transport_mode: form.get("transport_mode") || null,
         space_preference: form.get("space_preference") || null,
         activity_preferences: Object.fromEntries(
-          form.getAll("activities").map((code) => [code, 5]),
+          ["food", "cafe", "walk", "culture", "entertainment", "shopping", "drink"]
+            .map((code) => [code, Number(form.get(`activity_${code}`) || 0)])
+            .filter(([, level]) => level > 0),
         ),
       });
       onAccountChange({ ...account, preferences });
@@ -336,11 +433,35 @@ function HomePage({
     }
   };
 
-  const locationText =
-    status === "success"
+  const clearLearning = async () => {
+    if (!account?.token || clearingLearning) return;
+    setClearingLearning(true);
+    setAccountError("");
+    try {
+      await clearInteractionHistory(account.token);
+      onAccountChange({
+        ...account,
+        personalization: {
+          activity_preferences: {},
+          context_activity_preferences: {},
+          interaction_count: 0,
+        },
+      });
+    } catch (requestError) {
+      setAccountError(requestError.message);
+    } finally {
+      setClearingLearning(false);
+    }
+  };
+
+  const locationText = manualLocation
+    ? "직접 선택한 출발지를 사용 중이에요"
+    : status === "success"
       ? "현재 위치를 사용하고 있어요"
       : status === "loading"
         ? "현재 위치를 확인하는 중이에요"
+        : status === "low_accuracy"
+          ? "GPS 정확도가 낮아 더 정확한 위치를 찾는 중이에요"
         : status === "denied"
           ? "지역을 입력하거나 위치 권한을 허용해 주세요"
           : status === "unavailable"
@@ -370,8 +491,9 @@ function HomePage({
           className="account-button"
           type="button"
           onClick={openAccount}
+          disabled={account?.restoring}
         >
-          {account?.user ? account.user.nickname : "로그인"}
+          {account?.user ? <><span className="account-button-name">{account.user.nickname}</span>{account.gamification?.equipped_title?.name && <small className="account-button-title">{account.gamification.equipped_title.name}</small>}</> : account?.restoring ? "로그인 확인 중" : "로그인"}
         </button>
       </header>
       <section className="home-intro">
@@ -386,38 +508,84 @@ function HomePage({
           경로까지 추천해드려요.
         </p>
       </section>
-      <button
-        className={`location-card location-card--${status}`}
-        type="button"
-        onClick={() =>
-          status === "success" ? clearLocation() : requestLocation()
-        }
-      >
-        <span className="location-icon">⌖</span>
-        <span>
-          <strong>{locationText}</strong>
-          <small>
-            {status === "success"
-              ? address?.road_address ||
-                address?.jibun_address ||
-                address?.display_name ||
-                (addressStatus === "unavailable"
-                  ? "주소를 확인하지 못했어요 · 좌표는 적용됐어요"
-                  : "도로명 주소를 확인하고 있어요")
-              : "눌러서 현재 위치 확인하기"}
-          </small>
-        </span>
-        <span
-          className="location-action"
-          aria-label={
-            status === "success"
-              ? "한 번 더 누르면 현재 위치 사용 해제"
-              : undefined
+      <section className="start-location-panel" aria-label="출발 위치">
+        <button
+          className={`location-card location-card--${manualLocation ? "success" : status}`}
+          type="button"
+          onClick={() =>
+            manualLocation
+              ? clearManualLocation()
+              : status === "success"
+                ? clearLocation()
+                : requestLocation()
           }
         >
-          {status === "loading" ? "…" : status === "success" ? "✓" : "›"}
-        </span>
-      </button>
+          <span className="location-icon">⌖</span>
+          <span>
+            <strong>{locationText}</strong>
+            <small>
+              {manualLocation
+                ? [manualLocation.name, manualLocation.address].filter(Boolean).join(" · ")
+                : status === "success"
+                  ? address?.road_address ||
+                    address?.jibun_address ||
+                    address?.display_name ||
+                    (addressStatus === "unavailable"
+                      ? "주소를 확인하지 못했어요 · 좌표는 적용됐어요"
+                      : "도로명 주소를 확인하고 있어요")
+                  : status === "denied" || status === "unavailable" || status === "unsupported"
+                    ? "아래에서 역이나 동네를 검색해 출발지를 정할 수 있어요"
+                    : "눌러서 현재 위치 확인하기"}
+              {!manualLocation && status === "success" &&
+                location?.accuracy > FAST_GPS_ACCURACY_METERS &&
+                ` · GPS 오차 범위 약 ${Math.round(location.accuracy)}m`}
+            </small>
+          </span>
+          <span
+            className="location-action"
+            aria-label={
+              manualLocation
+                ? "직접 선택한 출발지 사용 해제"
+                : status === "success"
+                  ? "한 번 더 누르면 현재 위치 사용 해제"
+                  : undefined
+            }
+          >
+            {manualLocation
+              ? "✓"
+              : status === "loading" || status === "low_accuracy"
+                ? "…"
+                : status === "success"
+                  ? "✓"
+                  : "›"}
+          </span>
+        </button>
+        {canChooseManualStart && (
+        <form className="start-location-search" onSubmit={handleSearchStartLocation}>
+        <label className="sr-only" htmlFor="start-location-query">출발 지역 직접 입력</label>
+        <input
+          id="start-location-query"
+          value={startLocationQuery}
+          onChange={(event) => {
+            setStartLocationQuery(event.target.value);
+            if (manualLocation) setManualLocation(null);
+            setLocationSearchError("");
+          }}
+          placeholder="GPS가 안 잡히면 역·동네 이름 입력"
+          autoComplete="off"
+        />
+        <button type="submit" disabled={searchingLocation || startLocationQuery.trim().length < 2}>
+          {searchingLocation ? "찾는 중" : "출발지 설정"}
+        </button>
+        {locationSearchError && <p role="alert">{locationSearchError}</p>}
+        {manualLocation && (
+          <button className="start-location-use-gps" type="button" onClick={() => { clearManualLocation(); requestLocation(); }}>
+            현재 위치 다시 찾기
+          </button>
+        )}
+        </form>
+        )}
+      </section>
       <form className="recommendation-form" onSubmit={handleSubmit}>
         <div className="recommendation-label-row">
           <label htmlFor="recommendation-message">
@@ -625,247 +793,42 @@ function HomePage({
           </section>
         </div>
       )}
-      {accountOpen && (
-        <div className="account-modal" role="dialog" aria-modal="true">
-          <div className="account-panel">
-            <button
-              className="account-close"
-              type="button"
-              onClick={closeAccount}
-            >
-              ×
-            </button>
-            {account?.user ? (
-              <form onSubmit={savePreferences}>
-                <div className="account-page-heading">
-                  <small>내 코알라</small>
-                  <h2>{account.user.nickname}님, 취향에 맞춰드릴게요</h2>
-                  <p>설정한 내용은 장소 순서와 이동 방법을 정할 때 사용돼요.</p>
-                </div>
-                <p className="personalization-summary">
-                  {account.personalization?.interaction_count
-                    ? `${account.personalization.interaction_count}개의 선택을 추천에 반영하고 있어요.`
-                    : "장소를 저장하고 코스를 확정하면 취향을 학습해요."}
-                </p>
-                {isMockAuthEnabled() && (
-                  <p className="mock-auth-notice">
-                    개발용 임시 계정 · 이 기기에만 저장돼요
-                  </p>
-                )}
-                <nav className="account-section-tabs" aria-label="내 코알라 메뉴">
-                  <button
-                    type="button"
-                    className={accountSection === "taste" ? "is-active" : ""}
-                    onClick={() => setAccountSection("taste")}
-                  >
-                    내 취향
-                  </button>
-                  <button
-                    type="button"
-                    className={accountSection === "library" ? "is-active" : ""}
-                    onClick={() => setAccountSection("library")}
-                  >
-                    저장한 목록
-                  </button>
-                </nav>
-                {accountSection === "taste" && <>
-                <div className="preference-benefit" role="note">
-                  <b>이렇게 달라져요</b>
-                  <span>선호 활동은 먼저 보여주고, 이동수단과 실내·야외 성향은 코스 계산에 반영해요.</span>
-                </div>
-                <label>
-                  이동수단
-                  <select
-                    name="transport_mode"
-                    defaultValue={
-                      account.preferences?.transport_mode ?? "public_transit"
-                    }
-                  >
-                    <option value="public_transit">대중교통</option>
-                    <option value="car">자동차</option>
-                    <option value="walk">도보</option>
-                    <option value="auto">자동 선택</option>
-                  </select>
-                </label>
-                <label>
-                  공간
-                  <select
-                    name="space_preference"
-                    defaultValue={
-                      account.preferences?.space_preference ?? "any"
-                    }
-                  >
-                    <option value="any">상관없음</option>
-                    <option value="indoor">실내</option>
-                    <option value="outdoor">야외</option>
-                  </select>
-                </label>
-                <fieldset className="preference-activities">
-                  <legend>좋아하는 활동</legend>
-                  {[
-                    ["food", "맛집"],
-                    ["cafe", "카페"],
-                    ["walk", "산책"],
-                    ["culture", "문화"],
-                    ["entertainment", "놀거리"],
-                    ["shopping", "쇼핑"],
-                    ["drink", "술집"],
-                  ].map(([code, label]) => (
-                    <label key={code}>
-                      <input
-                        type="checkbox"
-                        name="activities"
-                        value={code}
-                        defaultChecked={
-                          (account.preferences?.activity_preferences?.[code] ??
-                            0) >= 4
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </fieldset>
-                </>}
-                {accountSection === "library" && <>
-                <section className="saved-course-list">
-                  <b>즐겨찾기 장소</b>
-                  {favoritePlaces.length ? (
-                    favoritePlaces.map((place) => (
-                      <div key={place.place_key}>
-                        <button
-                          className="saved-course-open"
-                          type="button"
-                          onClick={() => {
-                            setMessage(`${place.place_name}을 포함해서 지금 갈 코스를 추천해줘.`);
-                            setAccountOpen(false);
-                          }}
-                        >
-                          <strong>{place.place_name}</strong>
-                          <small>{place.category ?? "저장한 장소"} · 코스에 넣기</small>
-                        </button>
-                        <button type="button" onClick={() => removeFavorite(place.place_key)}>
-                          삭제
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <small>즐겨찾기한 장소가 아직 없어요.</small>
-                  )}
-                </section>
-                <section className="saved-course-list">
-                  <b>숨긴 장소</b>
-                  {excludedPlaces.length ? (
-                    excludedPlaces.map((place) => (
-                      <div key={place.place_key}>
-                        <span className="saved-course-open">
-                          <strong>{place.place_name}</strong>
-                          <small>추천에서 제외 중</small>
-                        </span>
-                        <button type="button" onClick={() => restorePlace(place.place_key)}>
-                          복원
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <small>숨긴 장소가 없어요.</small>
-                  )}
-                </section>
-                <section className="saved-course-list">
-                  <b>저장한 코스</b>
-                  {savedCourses.length ? (
-                    savedCourses.map((course) => (
-                      <div key={course.id}>
-                        <button
-                          className="saved-course-open"
-                          type="button"
-                          onClick={() => openSavedCourse(course)}
-                        >
-                          <strong>{course.title}</strong>
-                          <small>
-                            {new Date(course.created_at).toLocaleDateString(
-                              "ko-KR",
-                            )}
-                            {" · 지도에서 다시 보기"}
-                          </small>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeSavedCourse(course.id)}
-                        >
-                          삭제
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <small>저장한 코스가 아직 없어요.</small>
-                  )}
-                  {savedCourseNotice && <p>{savedCourseNotice}</p>}
-                </section>
-                </>}
-                {accountError && <p>{accountError}</p>}
-                {accountSection === "taste" && <button type="submit">내 취향 저장하기</button>}
-                <button
-                  className="account-logout"
-                  type="button"
-                  onClick={() => {
-                    localStorage.removeItem("koala-token");
-                    onAccountChange({
-                      token: null,
-                      user: null,
-                      preferences: null,
-                      personalization: null,
-                    });
-                    setAccountOpen(false);
-                  }}
-                >
-                  로그아웃
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleAccount}>
-                <h2>{accountMode === "login" ? "로그인" : "회원가입"}</h2>
-                {isMockAuthEnabled() && (
-                  <p className="mock-auth-notice">
-                    개발용 임시 로그인 모드예요 · 실제 DB에는 저장되지 않아요
-                  </p>
-                )}
-                {accountMode === "signup" && (
-                  <input name="nickname" placeholder="닉네임" required />
-                )}
-                <input
-                  name="email"
-                  type="email"
-                  placeholder="이메일"
-                  required
-                />
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="비밀번호 8자 이상"
-                  minLength="8"
-                  required
-                />
-                {accountError && <p>{accountError}</p>}
-                <button type="submit">
-                  {accountMode === "login" ? "로그인" : "가입하고 로그인"}
-                </button>
-                <button
-                  className="account-switch"
-                  type="button"
-                  onClick={() =>
-                    setAccountMode(accountMode === "login" ? "signup" : "login")
-                  }
-                >
-                  {accountMode === "login"
-                    ? "처음이신가요? 회원가입"
-                    : "이미 계정이 있어요"}
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-      <PromptHelpDialog
+      <AccountModal
+        account={accountOpen ? account : null}
+        accountMode={accountMode}
+        accountSection={accountSection}
+        gamificationError={gamificationError}
+        exploredRegions={exploredRegions}
+        accountError={accountError}
+        clearingLearning={clearingLearning}
+        favoritePlaces={favoritePlaces}
+        excludedPlaces={excludedPlaces}
+        savedCourses={savedCourses}
+        savedCourseNotice={savedCourseNotice}
+        onClose={closeAccount}
+        onLogin={handleAccount}
+        onSwitchMode={() => {
+          setAccountError("");
+          setAccountMode(accountMode === "login" ? "signup" : "login");
+        }}
+        onSavePreferences={savePreferences}
+        onClearLearning={clearLearning}
+        onSectionChange={setAccountSection}
+        onEquipTitle={equipTitle}
+        onUseFavorite={(place) => {
+          setMessage(`${place.place_name}을 포함해서 지금 갈 코스를 추천해줘.`);
+          setAccountOpen(false);
+        }}
+        onRemoveFavorite={removeFavorite}
+        onRestorePlace={restorePlace}
+        onOpenSavedCourse={openSavedCourse}
+        onRemoveSavedCourse={removeSavedCourse}
+        onLogout={() => {
+          localStorage.removeItem("koala-token");
+          onAccountChange({ token: null, user: null, preferences: null, personalization: null, gamification: null });
+          setAccountOpen(false);
+        }}
+      />      <PromptHelpDialog
         open={promptHelpOpen}
         onClose={() => setPromptHelpOpen(false)}
         onSelectExample={usePromptExample}

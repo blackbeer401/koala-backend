@@ -1,9 +1,9 @@
 """Thin HTTP endpoints supplied by the local extension layer."""
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from extension_schemas import PlacePhotoBatchRequest
-from map_service import get_visual_travel, reverse_geocode
+from map_service import get_visual_travel, reverse_geocode, search_location
 from naver_image_service import get_cached_image, lookup_place_photos
 from user_data_routes import router as user_data_router
 
@@ -19,6 +19,22 @@ def reverse_geocode_api(latitude: float, longitude: float):
         "display_name": None,
         "road_address": None,
         "jibun_address": None,
+    }
+
+
+@router.get("/search-location")
+def search_location_api(query: str = Query(min_length=2, max_length=120)):
+    result = search_location(query)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="지역을 찾지 못했어요. 역 이름이나 동네 이름으로 다시 검색해 주세요.",
+        )
+    return {
+        "name": result.get("name") or query.strip(),
+        "address": result.get("address"),
+        "latitude": result["y"],
+        "longitude": result["x"],
     }
 
 

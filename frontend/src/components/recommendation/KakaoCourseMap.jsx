@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { reportDuration } from "../../utils/performanceMetric";
+import { describeMapLoadFailure } from "../../utils/mapLoadError";
 
 const SCRIPT_ID = "kakao-map-sdk";
 let kakaoMapPromise = null;
@@ -235,6 +236,7 @@ function KakaoCourseMap({
   const guidanceLiveFocusStepRef = useRef(null);
   const userMovedGuidanceMapRef = useRef(false);
   const [status, setStatus] = useState("loading");
+  const [loadError, setLoadError] = useState(null);
   const [mapReady, setMapReady] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const key = import.meta.env.VITE_KAKAO_MAP_KEY;
@@ -274,6 +276,7 @@ function KakaoCourseMap({
     let cancelled = false;
     const sdkStartedAt = performance.now();
     setStatus("loading");
+    setLoadError(null);
     loadKakaoMapWithRetry(key)
       .then((maps) => {
         if (cancelled) return;
@@ -287,7 +290,14 @@ function KakaoCourseMap({
         setMapReady(true);
         reportDuration("map-sdk-display", sdkStartedAt);
       })
-      .catch(() => !cancelled && setStatus("error"));
+      .catch((error) => {
+        if (cancelled) return;
+        // Keep a useful failure category in diagnostics; never log the SDK URL or app key.
+        const reason = describeMapLoadFailure(error);
+        console.warn("[KakaoMap] SDK load failed:", reason);
+        setLoadError(reason);
+        setStatus("error");
+      });
 
     return () => {
       cancelled = true;
@@ -766,6 +776,8 @@ function KakaoCourseMap({
         <div className="map-status map-status--retry">
           <b>지도 연결이 잠시 끊겼어요.</b>
           <span>장소와 코스는 계속 확인할 수 있어요.</span>
+          <span>카카오 개발자 설정에 현재 접속 주소가 등록되어 있는지 확인해 주세요.</span>
+          {loadError && <small>오류 원인: {loadError}</small>}
           <button
             type="button"
             onClick={() => setLoadAttempt((value) => value + 1)}

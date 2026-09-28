@@ -124,6 +124,8 @@ app.include_router(adventure_router)
 app.include_router(preference_router, prefix="/ml")
 
 
+
+
 # 2. 서버 기본 동작 확인
 @app.get("/")
 def root():
@@ -156,6 +158,7 @@ def recommend(
         name: {"seconds": 0.0, "calls": 0}
         for name in (
             "intent_llm",
+            "geocode",
             "proactive",
             "proactive_travel",
             "region_travel",
@@ -197,7 +200,7 @@ def recommend(
                 "message_llm",
                 generate_recommendation_message,
             ),
-            search_location_fn=search_location,
+            search_location_fn=measured("geocode", search_location),
             get_travel_fn=measured("region_travel", get_travel),
             load_poi_candidates_fn=measured("poi_load", load_poi_candidates),
             load_poi_activity_scores_fn=measured(
@@ -216,12 +219,14 @@ def recommend(
         )
     finally:
         performance_logger.info(
-            "[PERFORMANCE] total=%.4fs intent_llm=%.4fs "
+            "[PERFORMANCE] total=%.4fs intent_llm=%.4fs geocode=%.4fs calls=%d "
             "proactive=%.4fs proactive_travel=%.4fs calls=%d "
             "region_travel=%.4fs calls=%d congestion=%.4fs calls=%d "
             "message_llm=%.4fs activity_score=%.4fs poi_load=%.4fs",
             perf_counter() - total_started,
             metrics["intent_llm"]["seconds"],
+            metrics["geocode"]["seconds"],
+            metrics["geocode"]["calls"],
             metrics["proactive"]["seconds"],
             metrics["proactive_travel"]["seconds"],
             metrics["proactive_travel"]["calls"],

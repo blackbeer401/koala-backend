@@ -1,6 +1,6 @@
 # KOALA Backend
 
-KOALA는 사용자의 자연어 요청, 현재 위치, 가용 시간, 이동수단 등을 바탕으로 서울에서 방문하기 적합한 지역과 실제 장소를 추천하고, 선택한 장소의 실제 이동시간을 기준으로 방문 코스를 구성하는 FastAPI 백엔드입니다.
+KOALA는 사용자의 자연어 요청, 출발 위치, 가용 시간, 이동수단 등을 바탕으로 서울에서 방문하기 적합한 지역과 실제 장소를 추천하고, 선택한 장소의 실제 이동시간을 기준으로 방문 코스를 구성하는 FastAPI 백엔드입니다. 개발·통합 실행은 저장소 루트의 `backend/run.py`가 Core와 확장 기능을 합친 `run:app`을 제공합니다.
 
 지역 추천에서는 기존 서울 주요 121개 POI와 서울 행정동 기반 후보를 함께 평가하며, 행정동 후보에는 생활인구 기반 D-4 머신러닝 모델의 상대 혼잡도 예측을 적용합니다.
 
@@ -283,6 +283,14 @@ ml/
 py -3.14 population_history.py 2026-09-13
 ```
 
+D-4 모델의 기준 이력을 한 번에 준비하거나 누락 날짜를 보충할 때는 다음 유지보수 명령을 사용합니다. 이미 완전한 날짜는 다시 받지 않습니다.
+
+```powershell
+python -m population_history_maintenance
+```
+
+이 작업은 매일 실행해야 최신 공개일을 반영할 수 있습니다. 현재 앱 시작 과정에서는 외부 API 호출을 기다리지 않도록 자동 실행하지 않으므로, 운영 환경에서는 Windows 작업 스케줄러 등으로 매일 오전 6시 이후 실행하도록 등록합니다. history가 비어 있거나 필요한 공개일이 아직 없으면 혼잡도는 중립 점수로 처리되고 화면에는 자료 부족으로 표시됩니다.
+
 운영 history 파일은 다음 위치에 생성됩니다.
 
 ```text
@@ -440,6 +448,16 @@ INFEASIBLE
 * Argon2 비밀번호 해시
 * JWT HS256 Access Token
 * Bearer Token 기반 사용자 조회
+* SMTP 이메일 OTP를 이용한 계정 찾기와 비밀번호 재설정
+
+복구 이메일 기능은 `users.recovery_email`, `users.token_version`, `account_recovery_codes`를 사용합니다. 기존 DB에는 아래 마이그레이션을 적용해야 하며, 발송 계정 정보는 `backend/core/.env`에 설정합니다.
+
+```powershell
+Set-Location backend/core
+..\..\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`을 설정하세요. 기본은 587 포트 STARTTLS이며, 465 포트는 `SMTP_USE_SSL=true`로 설정합니다. SMTP 비밀번호는 저장소나 채팅에 올리지 마세요. 인증 코드는 10분 동안 유효하고 1회 사용되며, 재시도 횟수와 발송 빈도에 제한이 있습니다.
 
 주요 테이블:
 
@@ -448,7 +466,18 @@ INFEASIBLE
 * `activity_categories`
 * `user_activity_preferences`
 
-현재 추천 API는 로그인 없이 사용할 수 있으며 사용자 선호 DB는 향후 추천 개인화를 위한 구조로 준비되어 있습니다.
+### 통합 앱의 실제 개인화 동작
+
+`run:app`은 인증·선호도 기능에 더해 다음 사용자 데이터를 연결합니다.
+
+* 직접 선택한 활동·공간·이동수단 선호는 행동으로 추정한 선호보다 우선합니다.
+* 장소 열람·선택, 좋아요·숨김, 코스 확인 이력을 활동별 추천 신호로 집계합니다.
+* 같은 장소의 좋아요·싫어요·숨김은 가장 최근 피드백만 사용합니다.
+* 오래된 행동 신호는 60일 반감기로 약해집니다.
+* 개인화 데이터 조회가 실패해도 지역 추천은 비개인화 방식으로 계속 동작합니다.
+* `GET /users/me/personalization`은 집계 프로필을 제공하고 `DELETE /users/me/interactions`는 학습 이력만 초기화합니다. 직접 설정한 취향과 저장 목록은 유지합니다.
+
+로그인하지 않은 사용자는 핵심 추천을 계속 사용할 수 있지만, 계정별 선호 저장과 행동 기반 개인화는 적용되지 않습니다. `backend/core/main.py` 단독 실행은 Core 앱이며, 위 사용자 데이터 확장 라우터를 포함하는 기본 운영 진입점은 `backend/run.py`의 `run:app`입니다.
 
 ---
 
@@ -465,7 +494,25 @@ INFEASIBLE
 | `POST` | `/recommend/course`                    | 실제 이동시간 기반 코스 최적화   |
 | `POST` | `/auth/signup`                         | 회원가입                |
 | `POST` | `/auth/login`                          | JWT Access Token 발급 |
+| `GET`  | `/auth/recovery/status`                | 이메일 복구 사용 가능 여부 |
+| `POST` | `/auth/recovery/email-code`            | 회원가입 복구 이메일 인증 코드 발송 |
+| `POST` | `/auth/recovery/username`              | 로그인 이메일 확인 코드 발송 |
+| `POST` | `/auth/recovery/username/verify`       | 로그인 이메일 일부 확인 |
+| `POST` | `/auth/recovery/password`              | 비밀번호 재설정 코드 발송 |
+| `POST` | `/auth/recovery/password/verify`       | 비밀번호 변경 및 기존 세션 만료 |
+| `POST` | `/users/me/recovery-email/request`     | 로그인 후 복구 이메일 등록 코드 발송 |
+| `POST` | `/users/me/recovery-email/verify`      | 복구 이메일 인증 완료 |
 | `GET`  | `/users/me`                            | 현재 사용자 조회           |
+| `GET`  | `/users/me/preferences`                | 저장한 직접 선호 조회        |
+| `PUT`  | `/users/me/preferences`                | 직접 선호 저장             |
+| `GET`  | `/users/me/personalization`            | 행동 기반 선호 프로필 조회     |
+| `POST` | `/users/me/interactions`               | 추천 행동 기록             |
+| `DELETE` | `/users/me/interactions`             | 행동 학습 기록 초기화         |
+| `GET/POST/DELETE` | `/users/me/favorite-places`   | 즐겨찾기 관리              |
+| `GET/POST/DELETE` | `/users/me/excluded-places`   | 제외 장소 관리             |
+| `GET/POST/DELETE` | `/users/me/courses`           | 저장 코스 관리             |
+| `GET`  | `/search-location`                     | 출발지 역·동네 검색          |
+| `GET`  | `/reverse-geocode`                     | 좌표를 표시용 주소로 변환      |
 | `GET`  | `/openapi.json`                        | OpenAPI schema      |
 | `GET`  | `/docs`                                | Swagger UI          |
 | `GET`  | `/redoc`                               | ReDoc               |

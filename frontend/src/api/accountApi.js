@@ -9,6 +9,9 @@ const COURSE_KEY = 'koala-mock-courses'
 const EXCLUDED_PLACE_KEY = 'koala-mock-excluded-places'
 const FAVORITE_PLACE_KEY = 'koala-mock-favorite-places'
 const INTERACTION_KEY = 'koala-mock-interactions'
+const EXPLORED_REGIONS_KEY = 'koala-mock-explored-regions'
+const GAMIFICATION_KEY = 'koala-mock-gamification'
+const GAMIFICATION_EVENTS_KEY = 'koala-mock-gamification-events'
 const defaultPreferences = { transport_mode: 'public_transit', space_preference: 'any', activity_preferences: {} }
 
 function read(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
@@ -28,9 +31,23 @@ async function api(path, { method = 'GET', token, body } = {}) {
   const data = response.status === 204 ? null : await response.json().catch(() => ({}))
   if (!response.ok) {
     const detail = typeof data?.detail === 'string' ? data.detail : ''
-    const message = detail === 'Not Found'
-      ? '회원가입 서버 주소를 찾지 못했어요. 잠시 후 다시 시도해 주세요.'
-      : (detail || '계정 정보를 처리하지 못했어요.')
+    const invalidFields = Array.isArray(data?.detail)
+      ? data.detail.map((issue) => issue?.loc?.at?.(-1)).filter(Boolean)
+      : []
+    const validationMessage = invalidFields.includes('email_verification_code')
+      ? '이메일 인증 코드를 다시 확인해 주세요.'
+      : invalidFields.includes('password')
+        ? '비밀번호 규칙을 확인해 주세요.'
+        : invalidFields.includes('email')
+          ? '이메일 주소를 확인해 주세요.'
+          : invalidFields.includes('nickname')
+            ? '닉네임을 확인해 주세요.'
+            : ''
+    const message = response.status === 401
+      ? '로그인이 만료됐거나 확인되지 않았어요. 다시 로그인해 주세요.'
+      : detail === 'Not Found'
+        ? '회원가입 서버 주소를 찾지 못했어요. 잠시 후 다시 시도해 주세요.'
+        : (detail || validationMessage || '계정 정보를 처리하지 못했어요.')
     const error = new Error(message)
     error.status = response.status
     throw error
@@ -51,18 +68,74 @@ export async function signup(body) {
   if (!localStorage.getItem(PREF_KEY)) write(PREF_KEY, defaultPreferences)
   return mockUser(body)
 }
-export async function login(body) { if (!MOCK_AUTH) return api('/auth/login', { method: 'POST', body }); mockUser(body); return { access_token: MOCK_TOKEN, token_type: 'bearer', mock: true } }
+
+export async function getRecoveryStatus() {
+  if (MOCK_AUTH) return { email_enabled: false }
+  return api('/auth/recovery/status')
+}
+
+export async function sendSignupEmailCode(email) {
+  if (MOCK_AUTH) return { message: '임시 로그인에서는 이메일 발송 없이 가입할 수 있어요.' }
+  return api('/auth/signup/email-code', { method: 'POST', body: { email } })
+}
+
+export async function requestUsernameRecovery(email) {
+  if (MOCK_AUTH) throw new Error('임시 로그인에서는 계정 찾기를 사용할 수 없어요.')
+  return api('/auth/recovery/username', { method: 'POST', body: { email } })
+}
+
+export async function verifyUsernameRecovery(email, code) {
+  if (MOCK_AUTH) throw new Error('임시 로그인에서는 계정 찾기를 사용할 수 없어요.')
+  return api('/auth/recovery/username/verify', { method: 'POST', body: { email, code } })
+}
+
+export async function requestPasswordReset(email) {
+  if (MOCK_AUTH) throw new Error('임시 로그인에서는 비밀번호 재설정을 사용할 수 없어요.')
+  return api('/auth/recovery/password', { method: 'POST', body: { email } })
+}
+
+export async function completePasswordReset(email, code, newPassword) {
+  if (MOCK_AUTH) throw new Error('임시 로그인에서는 비밀번호 재설정을 사용할 수 없어요.')
+  return api('/auth/recovery/password/verify', {
+    method: 'POST',
+    body: { email, code, new_password: newPassword },
+  })
+}
+
+export async function requestRecoveryEmailUpdate(token, email) {
+  return api('/users/me/recovery-email/request', { method: 'POST', token, body: { email } })
+}
+
+export async function verifyRecoveryEmailUpdate(token, email, code) {
+  return api('/users/me/recovery-email/verify', { method: 'POST', token, body: { email, code } })
+}
+
+export async function login(body) {
+  if (MOCK_AUTH) {
+    mockUser(body)
+    return { access_token: MOCK_TOKEN, token_type: 'bearer', mock: true }
+  }
+
+  try {
+    return await api('/auth/login', { method: 'POST', body })
+  } catch (error) {
+    if (error.status === 401) {
+      throw new Error('입력한 이메일 또는 비밀번호가 올바르지 않아요. 이메일을 잊으셨다면 ‘로그인 이메일 찾기’를 이용해 주세요.')
+    }
+    throw error
+  }
+}
 export async function getMe(token) { if (!MOCK_AUTH) return api('/users/me', { token }); assertMockToken(token); return mockUser() }
 export async function getPreferences(token) {
   if (MOCK_AUTH) { assertMockToken(token); return read(PREF_KEY, defaultPreferences) }
-  try { return normalizePreferences(await api('/ml/users/me/preferences', { token })) }
-  catch { return normalizePreferences(await api('/users/me/preferences', { token })) }
+  // The active core API exposes this canonical route. The /ml-prefixed route
+  // belongs to a different backend entry point and only adds a noisy 404 here.
+  return normalizePreferences(await api('/users/me/preferences', { token }))
 }
 export async function updatePreferences(token, body) {
   if (MOCK_AUTH) { assertMockToken(token); return write(PREF_KEY, normalizePreferences(body)) }
   const mlBody = { transport_mode: body.transport_mode, space_preference: body.space_preference, activity_preferences: Object.entries(body.activity_preferences ?? {}).map(([activity, preference_level]) => ({ activity, preference_level })) }
-  try { return normalizePreferences(await api('/ml/users/me/preferences', { method: 'PUT', token, body: mlBody })) }
-  catch { return normalizePreferences(await api('/users/me/preferences', { method: 'PUT', token, body: mlBody })) }
+  return normalizePreferences(await api('/users/me/preferences', { method: 'PUT', token, body: mlBody }))
 }
 export async function saveCourse(token, body) {
   if (!MOCK_AUTH) return api('/users/me/courses', { method: 'POST', token, body })
@@ -72,6 +145,128 @@ export async function saveCourse(token, body) {
   return saved
 }
 export async function getSavedCourses(token) { if (!MOCK_AUTH) return api('/users/me/courses', { token }); assertMockToken(token); return read(COURSE_KEY, []) }
+export async function getExploredRegions(token) {
+  if (!MOCK_AUTH) return api('/users/me/explored-regions', { token })
+  assertMockToken(token); return read(EXPLORED_REGIONS_KEY, [])
+}
+export async function getGamificationProfile(token) {
+  if (!MOCK_AUTH) return api('/users/me/gamification', { token })
+  assertMockToken(token)
+  return read(GAMIFICATION_KEY, {
+    total_xp: 0,
+    rank_id: 'travel_novice',
+    rank_name: '여행초보',
+    rank_index: 1,
+    rank_count: 5,
+    xp_into_rank: 0,
+    next_rank_xp: 100,
+    xp_to_next_rank: 100,
+    equipped_title: { id: 'travel_novice', name: '여행초보', kind: 'rank' },
+    unlocked_titles: [{ id: 'travel_novice', name: '여행초보', kind: 'rank' }],
+    achievements: [],
+    explored_district_count: 0,
+    confirmed_course_count: 0,
+    completed_quest_count: 0,
+  })
+}
+export async function updateGamificationTitle(token, titleId) {
+  if (!MOCK_AUTH) return api('/users/me/gamification/title', { method: 'PUT', token, body: { title_id: titleId } })
+  assertMockToken(token)
+  const current = await getGamificationProfile(token)
+  const title = current.unlocked_titles.find((item) => item.id === titleId)
+  if (!title) throw new Error('아직 얻지 못한 칭호예요.')
+  const updated = { ...current, equipped_title: title }
+  write(GAMIFICATION_KEY, updated)
+  return updated
+}
+export async function awardGamificationEvent(token, body) {
+  if (!token) return null
+  if (!MOCK_AUTH) {
+    const result = await api('/users/me/gamification/events', { method: 'POST', token, body })
+    if (result?.regions) window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: result.regions }))
+    if (result?.newly_unlocked_districts?.length) {
+      try {
+        sessionStorage.setItem('koala-region-unlock-flash', JSON.stringify({ at: Date.now(), districts: result.newly_unlocked_districts }))
+      } catch { /* animation state is optional */ }
+      window.dispatchEvent(new CustomEvent('koala-region-unlocked', { detail: result.newly_unlocked_districts }))
+    }
+    if (result?.profile) writeGAMIFICATIONSnapshot(result.profile)
+    return result
+  }
+  assertMockToken(token)
+  const dailyQuest = body.event_type === 'quest_complete'
+    ? body.quest_id?.match(/^daily-(\d{4}-\d{2}-\d{2})-(main|bonus)$/)
+    : null
+  const mockEventKey = dailyQuest
+    ? `daily:quest:${dailyQuest[1]}:${dailyQuest[2]}`
+    : `${body.course_id}:${body.event_type}:${body.quest_id ?? ""}`
+  const eventKeys = read(GAMIFICATION_EVENTS_KEY, [])
+  if (eventKeys.includes(mockEventKey)) {
+    const profile = await getGamificationProfile(token)
+    writeGAMIFICATIONSnapshot(profile)
+    return { xp_awarded: 0, already_completed: true, newly_unlocked_districts: [], profile }
+  }
+  // 개발용 임시 로그인도 이벤트 키를 저장해 중복 보상은 막는다.
+  const profile = await getGamificationProfile(token)
+  const priorRegions = body.event_type === 'course_confirm' && body.districts?.length ? await getExploredRegions(token) : []
+  const priorDistrictCodes = new Set(priorRegions.map((region) => region.district_code))
+  const newlyUnlockedDistricts = body.event_type === 'course_confirm'
+    ? (body.districts ?? []).filter((district) => !priorDistrictCodes.has(district.district_code))
+    : []
+  const dailyQuestCount = dailyQuest
+    ? eventKeys.filter((key) => key.startsWith(`daily:quest:${dailyQuest[1]}:`)).length
+    : 0
+  const questReward = dailyQuestCount < 2 ? (dailyQuest?.[2] === 'main' ? 10 : 5) : 0
+  const awarded = (body.event_type === 'course_confirm' ? 10 : body.event_type === 'course_complete' ? 15 : dailyQuest ? questReward : 5) + newlyUnlockedDistricts.length * 20
+  const totalXp = profile.total_xp + awarded
+  const ranks = [['travel_novice','여행초보',0],['travel_intermediate','여행중수',100],['travel_expert','여행고수',300],['traveler','여행가',700],['travel_scholar','여행박사',1500]]
+  const rankIndex = Math.max(0, ranks.findLastIndex(([, , threshold]) => totalXp >= threshold))
+  const [rankId, rankName, rankStart] = ranks[rankIndex]
+  const rankTitles = ranks.slice(0, rankIndex + 1).map(([id, name]) => ({ id, name, kind: 'rank' }))
+  const updated = { ...profile, total_xp: totalXp, rank_id: rankId, rank_name: rankName, rank_index: rankIndex + 1, rank_count: 5, xp_into_rank: totalXp - rankStart, next_rank_xp: ranks[rankIndex + 1]?.[2] ?? null, xp_to_next_rank: ranks[rankIndex + 1] ? Math.max(0, ranks[rankIndex + 1][2] - totalXp) : 0, unlocked_titles: rankTitles, equipped_title: rankTitles.find((item) => item.id === profile.equipped_title?.id) ?? rankTitles[0], confirmed_course_count: profile.confirmed_course_count + (body.event_type === 'course_confirm' ? 1 : 0), completed_quest_count: profile.completed_quest_count + (body.event_type === 'quest_complete' ? 1 : 0) }
+  write(GAMIFICATION_KEY, updated)
+  writeGAMIFICATIONSnapshot(updated)
+  if (body.event_type === 'course_confirm' && body.districts?.length) {
+    const regions = await recordExploredRegions(token, { course_id: body.course_id, districts: body.districts })
+    updated.explored_district_count = regions.length
+    write(GAMIFICATION_KEY, updated)
+    writeGAMIFICATIONSnapshot(updated)
+    write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
+    const unlocked = newlyUnlockedDistricts.map((district) => ({ district_code: district.district_code, district_name: regions.find((region) => region.district_code === district.district_code)?.district_name }))
+    try { sessionStorage.setItem('koala-region-unlock-flash', JSON.stringify({ at: Date.now(), districts: unlocked })) } catch { /* animation state is optional */ }
+    return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: unlocked, profile: updated, regions }
+  }
+  write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
+  return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: [], profile: updated }
+}
+function writeGAMIFICATIONSnapshot(profile) {
+  window.dispatchEvent(new CustomEvent('koala-gamification-updated', { detail: profile }))
+}
+export async function recordExploredRegions(token, body) {
+  if (!token || !body?.districts?.length) return null
+  if (!MOCK_AUTH) {
+    const regions = await api('/users/me/explored-regions', { method: 'POST', token, body })
+    window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: regions }))
+    return regions
+  }
+  assertMockToken(token)
+  const current = read(EXPLORED_REGIONS_KEY, [])
+  const now = new Date().toISOString()
+  const names = { '11110':'종로구','11140':'중구','11170':'용산구','11200':'성동구','11215':'광진구','11230':'동대문구','11260':'중랑구','11290':'성북구','11305':'강북구','11320':'도봉구','11350':'노원구','11380':'은평구','11410':'서대문구','11440':'마포구','11470':'양천구','11500':'강서구','11530':'구로구','11545':'금천구','11560':'영등포구','11590':'동작구','11620':'관악구','11650':'서초구','11680':'강남구','11710':'송파구','11740':'강동구' }
+  for (const district of body.districts) {
+    const sameCourse = current.find((row) => row.district_code === district.district_code && row.course_ids?.includes(body.course_id))
+    const existing = current.find((row) => row.district_code === district.district_code)
+    const courseIds = new Set(existing?.course_ids ?? [])
+    courseIds.add(body.course_id)
+    const merged = [...new Set([...(existing?.place_names ?? []), ...district.place_names])].slice(0, 12)
+    const updated = { district_code: district.district_code, district_name: names[district.district_code], course_count: courseIds.size, course_ids: [...courseIds], last_used_at: sameCourse ? existing.last_used_at : now, place_names: merged }
+    const index = current.findIndex((row) => row.district_code === district.district_code)
+    if (index < 0) current.push(updated); else current[index] = updated
+  }
+  write(EXPLORED_REGIONS_KEY, current)
+  window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: current }))
+  return current
+}
 export async function deleteSavedCourse(token, courseId) {
   if (!MOCK_AUTH) return api(`/users/me/courses/${courseId}`, { method: 'DELETE', token })
   assertMockToken(token); write(COURSE_KEY, read(COURSE_KEY, []).filter((course) => String(course.id) !== String(courseId))); return null
@@ -134,6 +329,13 @@ export async function recordInteraction(token, body) {
   if (!MOCK_AUTH) return api('/users/me/interactions', { method: 'POST', token, body: payload })
   assertMockToken(token)
   write(INTERACTION_KEY, [payload, ...read(INTERACTION_KEY, [])].slice(0, 500))
+  return null
+}
+
+export async function clearInteractionHistory(token) {
+  if (!MOCK_AUTH) return api('/users/me/interactions', { method: 'DELETE', token })
+  assertMockToken(token)
+  write(INTERACTION_KEY, [])
   return null
 }
 

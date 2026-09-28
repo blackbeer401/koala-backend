@@ -134,18 +134,23 @@ def update_preferences(
             for field in request.model_fields_set & basic_fields:
                 setattr(preferences, field, getattr(request, field))
 
-        # 활동별 선호도는 기존 행이 있으면 수정하고, 없으면 새 행을 추가한다.
-        if requested_codes:
-            activity_ids = [categories_by_code[code].id for code in requested_codes]
+        # 활동 선호도가 요청에 포함되면 그 목록 전체를 저장한다. 프론트는
+        # "상관없음"으로 바꾼 활동을 제외해 보내므로 빠진 기존 값도 지운다.
+        if "activity_preferences" in request.model_fields_set:
             existing = db.scalars(
                 select(UserActivityPreference).where(
                     UserActivityPreference.user_id == user.id,
-                    UserActivityPreference.activity_id.in_(activity_ids),
                 )
             ).all()
             existing_by_activity_id = {
                 item.activity_id: item for item in existing
             }
+            requested_ids = {
+                categories_by_code[code].id for code in requested_codes
+            }
+            for activity_id, preference in existing_by_activity_id.items():
+                if activity_id not in requested_ids:
+                    db.delete(preference)
             for item in request.activity_preferences:
                 category = categories_by_code[item.activity]
                 preference = existing_by_activity_id.get(category.id)

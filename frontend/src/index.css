@@ -38,7 +38,7 @@ button, textarea, input { font: inherit; }
   cursor:pointer;
 }
 .place-favorite-button.is-active { color:#ffad24; background:#fff9e9; }
-.place-card-row .place-hide-button { top:38px; }
+.personalized-reason { display:inline-flex; margin:3px 4px 0 0; padding:3px 6px; border-radius:999px; color:#326db5; background:#eef6ff; font-size:9px; font-weight:800; }
 .personalization-summary {
   margin:0 0 12px;
   padding:9px 11px;
@@ -251,6 +251,31 @@ button, textarea, input { font: inherit; }
   .map-topbar { right: 10px; left: 10px; }
   .map-ranking-sheet { padding-right: 10px; padding-left: 10px; }
   .map-transport-selector button { gap: 3px; padding-right: 6px; padding-left: 6px; font-size: 10px; }
+}
+
+/* 데스크톱 기본 글자와 입력 요소를 키워 넓은 화면을 충분히 활용한다. */
+@media (min-width:900px) {
+  .home-page--sheet .home-eyebrow { font-size:15px; }
+  .home-page--sheet .home-intro-copy { max-width:420px; font-size:16px; line-height:1.65; }
+  .home-page--sheet .location-card { min-height:66px; gap:13px; padding:14px 16px; }
+  .home-page--sheet .location-card strong { font-size:16px; }
+  .home-page--sheet .location-card small { font-size:13px; }
+  .home-page--sheet .recommendation-form > label { font-size:18px; }
+  .home-page--sheet .recommendation-hint { font-size:14px; }
+  .home-page--sheet .recommendation-form textarea { padding:18px; font-size:17px; line-height:1.65; }
+  .home-page--sheet .guide-bubble { font-size:15px; }
+  .home-page--sheet .guide-heading small { font-size:12px; }
+  .home-page--sheet .guide-items span { font-size:14px; }
+  .home-page--sheet .recommendation-cta { font-size:19px; }
+
+  .results-sidebar .ranking-heading h2 { font-size:21px; }
+  .results-sidebar .ranking-heading p { font-size:13px; }
+  .results-sidebar .map-ranking-sheet .area-card-top strong { font-size:21px; }
+  .results-sidebar .map-ranking-sheet .area-card-top em { font-size:16px; }
+  .results-sidebar .map-ranking-sheet .area-metrics { font-size:14px; }
+  .results-sidebar .map-ranking-sheet .place-card strong { font-size:16px; }
+  .results-sidebar .map-ranking-sheet .place-card small { font-size:13px; }
+  .results-sidebar .map-ranking-sheet .place-card em { font-size:13px; }
 }
 
 /* 모바일 지도 헤더: 현재 선택값만 한 줄에 유지하고 변경할 때만 메뉴를 연다. */

@@ -1,6 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from threading import Lock
+from threading import BoundedSemaphore, Lock
+from time import perf_counter
+import logging
+from zoneinfo import ZoneInfo
 from audit_trace import record
 
 from models import RecommendRequest, StructuredConditions
@@ -45,6 +48,9 @@ except ImportError:
 
 
 MAX_REGION_TRAVEL_WORKERS = 3
+MAX_CONGESTION_WORKERS = 5
+MAX_PROACTIVE_WORKERS = 2
+PROACTIVE_RESPONSE_BUDGET_SECONDS = 0.35
 NEARBY_MAX_ONE_WAY_MINUTES = 20
 MAX_ROUTE_CORRIDOR_DETOUR_KM = 1.5
 MAX_LOCAL_RESD_PRESELECT_CANDIDATES = 20
@@ -52,11 +58,48 @@ MAX_LOCAL_RESD_TRAVEL_CANDIDATES = 5
 LOCAL_RESD_ACTIVITY_TYPES = frozenset({
     "food", "cafe", "drink", "entertainment",
 })
-ACTIVITY_PREFERENCE_BONUSES = {4: 0.1, 5: 0.2}
+ACTIVITY_PREFERENCE_BONUSES = {1: -0.3, 2: -0.15, 4: 0.1, 5: 0.2}
 AUTO_COURSE_VARIETY_POOL_SIZE = 8
 AUTO_COURSE_MAX_SCORE_GAP = 0.75
 _auto_course_rotation = {}
 _auto_course_rotation_lock = Lock()
+_proactive_executor = ThreadPoolExecutor(
+    max_workers=MAX_PROACTIVE_WORKERS,
+    thread_name_prefix="koala-proactive",
+)
+_proactive_slots = BoundedSemaphore(MAX_PROACTIVE_WORKERS)
+performance_logger = logging.getLogger("uvicorn.error")
+
+
+def _make_location_lookup(search_location_fn):
+    """Reuse identical geocoding results within one recommendation request."""
+    cache = {}
+
+    def lookup(location_text):
+        normalized = " ".join((location_text or "").split()).casefold()
+        if normalized not in cache:
+            cache[normalized] = search_location_fn(location_text)
+        return cache[normalized]
+
+    return lookup
+
+
+def _submit_optional_proactive(function, **kwargs):
+    """Run supplemental event lookup without queueing or blocking core search."""
+    if not _proactive_slots.acquire(blocking=False):
+        return None
+
+    def run():
+        try:
+            return function(**kwargs)
+        finally:
+            _proactive_slots.release()
+
+    try:
+        return _proactive_executor.submit(run)
+    except RuntimeError:
+        _proactive_slots.release()
+        return None
 
 
 def _rotate_auto_course_candidates(candidates, *, rotation_key, limit=3):
@@ -89,7 +132,16 @@ def _merge_stored_preferences(conditions, stored_preferences):
             stored_preferences.get("transport_mode")
             or conditions.transport_mode
         )
-    return stored_preferences.get("activity_preferences") or {}
+    activity_preferences = stored_preferences.get("activity_preferences") or {}
+    if not conditions.activities:
+        # 사용자가 활동을 직접 지정하지 않으면 좋아하는 활동을 출발점으로 삼고,
+        # "덜 추천"으로 설정한 활동은 이 목록에 넣지 않는다.
+        conditions.activities = [
+            activity
+            for activity, level in activity_preferences.items()
+            if int(level) >= 4
+        ]
+    return activity_preferences
 
 
 def _get_candidate_travel_pair(
@@ -149,10 +201,10 @@ def _local_activity_match_score(candidate, activities, activity_preferences):
         if score is None:
             continue
         preference = activity_preferences.get(activity)
-        scores.append(min(
+        scores.append(max(0.0, min(
             5.0,
             float(score) + ACTIVITY_PREFERENCE_BONUSES.get(preference, 0),
-        ))
+        )))
     return sum(scores) / len(scores) if scores else 0
 
 
@@ -323,7 +375,9 @@ def recommend_regions(
     stored_preferences=None,
 ):
 
-    current_datetime = datetime.now().astimezone().isoformat()
+    # 의도 파싱과 추천 계산의 기준 시간대를 서버 설정에 맡기지 않고
+    # 서비스 지역(서울)로 통일한다. UTC 운영 환경에서 시간 조건이 어긋나는 것을 막는다.
+    current_datetime = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
 
     if request.auto_course:
         # 자동 코스는 현재 위치와 사용자가 고른 시간이 이미 확정되어 있다.
@@ -344,6 +398,7 @@ def recommend_regions(
         )
 
     conditions = StructuredConditions(**intent)
+    calculation_datetime = datetime.fromisoformat(current_datetime)
     if conditions.transport_mode == 'auto' and request.preferred_transport_mode is not None:
         conditions.transport_mode = request.preferred_transport_mode
     if conditions.space_preference is None and request.preferred_space is not None:
@@ -396,7 +451,8 @@ def recommend_regions(
 
     # 7. 시작시간 / 종료위치 / 종료시간 결정
     resolved_start_time = resolve_start_time(
-        conditions
+        conditions,
+        current_datetime=calculation_datetime,
     )
 
     resolved_end_location = resolve_end_location(
@@ -404,28 +460,27 @@ def recommend_regions(
     )
 
     resolved_end_time = resolve_end_time(
-        conditions
+        conditions,
+        current_datetime=calculation_datetime,
     )
 
     # 8. 시작시간과 종료시간을 실제 datetime으로 변환
     resolved_datetimes = resolve_datetimes(
         resolved_start_time,
-        resolved_end_time
+        resolved_end_time,
+        current_datetime=calculation_datetime,
     )
 
     # 9. 사용자가 실제로 사용할 수 있는 전체 시간 계산
     time_window = calculate_time_window(
         resolved_datetimes
     )
-    # 총 코스 예산과 장소 체류 희망시간은 의미가 다르다.
-    # 자동 코스 선택시간은 최우선 총 예산이며, 텍스트 요청은 마감시간으로
-    # 계산한 창을 우선하고 그것이 없을 때만 희망 기간을 총 예산으로 사용한다.
+    # 총 가용시간은 자동 코스에서 직접 고른 시간 또는 명시적인 시작/종료
+    # 시각으로 계산한다. 희망 체류시간은 총 코스 예산으로 대체하지 않는다.
     final_available_time = (
         request.auto_course_duration_minutes
         if request.auto_course
         else time_window["time_window_minutes"]
-        or conditions.desired_duration_max_minutes
-        or conditions.desired_duration_minutes
     )
     # 별도의 마감시간이 있을 때만 desired duration을 최소 체류 요구로 쓴다.
     # 같은 180분을 총 예산과 최소 체류시간에 동시에 적용하면 이동시간 때문에
@@ -462,9 +517,14 @@ def recommend_regions(
         for candidate in load_poi_candidates_fn()
     ]
 
+    # 시작·목적·종료 위치가 같은 문장으로 지정되면 Kakao 지오코딩 결과를
+    # 요청 안에서 재사용한다. 네트워크 조회 결과는 요청 간에 캐시하지 않아
+    # 위치 갱신으로 인한 오래된 좌표 사용을 피한다.
+    lookup_location = _make_location_lookup(search_location_fn)
+
     # 실제 시작 위치를 좌표 형태로 변환한다.
     if resolved_start_location["source"] == "text":
-        start_location = search_location_fn(
+        start_location = lookup_location(
             resolved_start_location["location_text"]
         )
         # 지도 검색으로 시작 위치를 찾지 못한 경우
@@ -488,7 +548,7 @@ def recommend_regions(
 
     # 사용자가 실제로 활동하고 싶은 목적 지역을 좌표 형태로 변환한다.
     if resolved_target_location["source"] == "text":
-        target_location = search_location_fn(
+        target_location = lookup_location(
             resolved_target_location["location_text"]
         )
 
@@ -537,7 +597,7 @@ def recommend_regions(
 
     # 실제 종료 위치를 좌표 형태로 변환한다.
     if resolved_end_location["source"] == "text":
-        end_location = search_location_fn(
+        end_location = lookup_location(
             resolved_end_location["location_text"]
         )
         # 지도 검색으로 종료 위치를 찾지 못한 경우
@@ -549,17 +609,15 @@ def recommend_regions(
     else:
         end_location = None
 
-    try:
-        proactive_suggestion = find_proactive_suggestion_fn(
-            start_location=start_location,
-            departure_datetime=resolved_datetimes["start_datetime"],
-            end_location=end_location,
-            end_datetime=resolved_datetimes["end_datetime"],
-            transport_mode=conditions.transport_mode,
-            activities=conditions.activities,
-        )
-    except Exception:
-        proactive_suggestion = None
+    proactive_future = _submit_optional_proactive(
+        find_proactive_suggestion_fn,
+        start_location=start_location,
+        departure_datetime=resolved_datetimes["start_datetime"],
+        end_location=end_location,
+        end_datetime=resolved_datetimes["end_datetime"],
+        transport_mode=conditions.transport_mode,
+        activities=conditions.activities,
+    )
 
     # 사용자가 활동할 목적 지역을 지정한 경우
     # target 주변의 여러 POI를 1차 후보로 가져온다.
@@ -1013,6 +1071,33 @@ def recommend_regions(
             api_candidates,
         ))
 
+    congestion_candidates = [
+        candidate
+        for candidate, travel_pair in zip(api_candidates, travel_pairs)
+        if travel_pair is not None
+        and not (
+            (request.auto_course or requests_nearby(request.user_message))
+            and travel_pair[0]["duration_min"] > NEARBY_MAX_ONE_WAY_MINUTES
+        )
+    ]
+    if congestion_candidates:
+        with ThreadPoolExecutor(
+            max_workers=min(MAX_CONGESTION_WORKERS, len(congestion_candidates))
+        ) as executor:
+            congestion_results = list(executor.map(
+                get_congestion_data_fn,
+                [candidate["AREA_CD"] for candidate in congestion_candidates],
+            ))
+        congestion_by_area = {
+            candidate["AREA_CD"]: congestion
+            for candidate, congestion in zip(
+                congestion_candidates,
+                congestion_results,
+            )
+        }
+    else:
+        congestion_by_area = {}
+
     for candidate, travel_pair in zip(api_candidates, travel_pairs):
         if travel_pair is None:
             continue
@@ -1077,9 +1162,7 @@ def recommend_regions(
                 candidate["travel_time_classification"]["total_travel_minutes"]
             )
 
-        congestion_data = get_congestion_data_fn(
-            candidate["AREA_CD"]
-        )
+        congestion_data = congestion_by_area.get(candidate["AREA_CD"])
 
         # 혼잡도 데이터가 있는 경우
         if congestion_data:
@@ -1260,6 +1343,27 @@ def recommend_regions(
         recommendation_result=recommendation_result
     )
 
+    proactive_wait_started = perf_counter()
+    proactive_completed = False
+    proactive_suggestion = None
+    if proactive_future is not None:
+        try:
+            proactive_suggestion = proactive_future.result(
+                timeout=PROACTIVE_RESPONSE_BUDGET_SECONDS
+            )
+            proactive_completed = True
+        except TimeoutError:
+            # 선제 이벤트는 보조 정보다. 느린 외부 문화행사 API가 일반 검색을
+            # 붙잡지 않도록 이번 응답에서 생략하고 백그라운드 작업은 계속 둔다.
+            pass
+        except Exception:
+            pass
+    performance_logger.info(
+        "[PERFORMANCE] proactive_wait=%.4fs completed=%s",
+        perf_counter() - proactive_wait_started,
+        proactive_completed,
+    )
+
     return {
         "recommendation_message": recommendation_message,
         "proactive_suggestion": proactive_suggestion,
@@ -1271,6 +1375,8 @@ def recommend_regions(
             "companions": conditions.companions,
             "budget_max": conditions.budget_max,
             "budget_preference": conditions.budget_preference,
+            # 지역 단계에서 계산한 명시적·행동 기반 취향을 장소 단계까지 이어준다.
+            "activity_preferences": activity_preferences,
             "start_location": {
                 "latitude": start_location["y"],
                 "longitude": start_location["x"],

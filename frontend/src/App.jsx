@@ -4,7 +4,7 @@ import AnalysisLoading from './components/recommendation/AnalysisLoading'
 import { useRecommendation } from './hooks/useRecommendation'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { removeSession, writeSession } from './utils/sessionStore'
-import { getMe, getPersonalizationProfile, getPreferences } from './api/accountApi'
+import { getGamificationProfile, getMe, getPersonalizationProfile, getPreferences } from './api/accountApi'
 
 const RecommendationPage = lazy(() => import('./pages/RecommendationPage'))
 
@@ -13,25 +13,27 @@ function App() {
   // 실제 경로 검증 요청이 재실행되므로 결과 화면을 자동 복원하지 않는다.
   const [result, setResult] = useState(null)
   const [view, setView] = useState('welcome')
+  // This flag controls whether the in-progress result stays mounted during account screens.
+  const [returnToResultAfterAccount, setReturnToResultAfterAccount] = useState(false)
   const requestId = useRef(0)
   const recommendationController = useRef(null)
   const { request, error } = useRecommendation()
-  const [account, setAccount] = useState({ token: localStorage.getItem('koala-token'), user: null, preferences: null })
+  const [account, setAccount] = useState({ token: localStorage.getItem('koala-token'), user: null, preferences: null, personalization: null, gamification: null, restoring: Boolean(localStorage.getItem('koala-token')) })
   const [accountRequestId, setAccountRequestId] = useState(0)
-  const returnToResultAfterAccount = useRef(false)
+  const gamificationSyncRef = useRef(0)
 
   // 결과 화면에서 로그인이 필요해도 작성 중인 코스를 폐기하지 않는다.
   const handleAccountChange = (nextAccount) => {
-    setAccount(nextAccount)
-    if (returnToResultAfterAccount.current && result) {
-      returnToResultAfterAccount.current = false
+    setAccount((current) => ({ ...current, ...nextAccount }))
+    if (returnToResultAfterAccount && result) {
+      setReturnToResultAfterAccount(false)
       setView('result')
     }
   }
 
   const closeAccountFromResult = () => {
-    if (!returnToResultAfterAccount.current || !result) return
-    returnToResultAfterAccount.current = false
+    if (!returnToResultAfterAccount || !result) return
+    setReturnToResultAfterAccount(false)
     setView('result')
   }
 
@@ -48,19 +50,76 @@ function App() {
     }
   }, [])
 
+  // Keep the account card in sync even while the home page is unmounted on results.
+  useEffect(() => {
+    if (!account.token) return
+    const applyProfileEvent = (event) => {
+      gamificationSyncRef.current += 1
+      if (event.detail) {
+        setAccount((current) => ({ ...current, gamification: event.detail }))
+      }
+    }
+    const refreshProfile = async () => {
+      const token = localStorage.getItem('koala-token')
+      if (!token || document.visibilityState === 'hidden') return
+      const syncVersion = gamificationSyncRef.current
+      try {
+        const profile = await getGamificationProfile(token)
+        if (syncVersion === gamificationSyncRef.current) {
+          setAccount((current) => current.token === token ? { ...current, gamification: profile } : current)
+        }
+      } catch {
+        // A temporary profile read failure must not erase the last known XP.
+      }
+    }
+    window.addEventListener('koala-gamification-updated', applyProfileEvent)
+    window.addEventListener('focus', refreshProfile)
+    document.addEventListener('visibilitychange', refreshProfile)
+    return () => {
+      window.removeEventListener('koala-gamification-updated', applyProfileEvent)
+      window.removeEventListener('focus', refreshProfile)
+      document.removeEventListener('visibilitychange', refreshProfile)
+    }
+  }, [account.token])
+
   useEffect(() => {
     const token = localStorage.getItem('koala-token')
     if (!token) return
-    Promise.all([getMe(token), getPreferences(token), getPersonalizationProfile(token)])
-      .then(([user, preferences, personalization]) => setAccount({ token, user, preferences, personalization }))
+    let cancelled = false
+    // 사용자 조회만 인증의 기준으로 삼는다. 부가 개인화 API가 실패해도
+    // 유효한 로그인 상태를 잃거나 새로고침 후 로그아웃 화면처럼 보이지 않게 한다.
+    getMe(token)
+      .then(async (user) => {
+        if (cancelled) return
+        setAccount((current) => ({ ...current, token, user, restoring: false }))
+        const [preferencesResult, personalizationResult, gamificationResult] = await Promise.allSettled([
+          getPreferences(token),
+          getPersonalizationProfile(token),
+          getGamificationProfile(token),
+        ])
+        if (cancelled) return
+        setAccount((current) => ({
+          ...current,
+          token,
+          user,
+          preferences: preferencesResult.status === 'fulfilled' ? preferencesResult.value : current.preferences,
+          personalization: personalizationResult.status === 'fulfilled' ? personalizationResult.value : current.personalization,
+          gamification: gamificationResult.status === 'fulfilled' ? gamificationResult.value : current.gamification,
+          restoring: false,
+        }))
+      })
       .catch((restoreError) => {
+        if (cancelled) return
         // 네트워크 단절이나 서버 점검은 로그아웃 사유가 아니다. 서버가 토큰을
         // 명시적으로 거부한 경우에만 저장된 로그인 정보를 제거한다.
         if (restoreError?.status === 401) {
           localStorage.removeItem('koala-token')
-          setAccount({ token: null, user: null, preferences: null, personalization: null })
+          setAccount({ token: null, user: null, preferences: null, personalization: null, gamification: null })
+        } else {
+          setAccount((current) => ({ ...current, restoring: false }))
         }
       })
+    return () => { cancelled = true }
   }, [])
 
   const handleRecommendation = async (payload) => {
@@ -113,7 +172,7 @@ function App() {
       <WelcomePage onStart={() => setView('home')} />
       <HomePage isOpen={view === 'home'} onRecommend={handleRecommendation} onOpenSavedCourse={openSavedCourse} error={error} account={account} onAccountChange={handleAccountChange} accountRequestId={accountRequestId} onAccountClose={closeAccountFromResult} />
       {view === 'loading' && <AnalysisLoading onEdit={cancelRecommendation} onCancel={cancelRecommendation} />}
-      {result && (view === 'result' || returnToResultAfterAccount.current) && <Suspense fallback={<AnalysisLoading onEdit={() => setView('home')} onCancel={() => setView('home')} />}><RecommendationPage response={result} onBack={() => { setResult(null); removeSession('koala-result'); setView('home') }} account={account} onOpenAccount={() => { returnToResultAfterAccount.current = true; setView('home'); setAccountRequestId((current) => current + 1) }} /></Suspense>}
+      {result && (view === 'result' || returnToResultAfterAccount) && <Suspense fallback={<AnalysisLoading onEdit={() => setView('home')} onCancel={() => setView('home')} />}><RecommendationPage response={result} onBack={() => { setResult(null); removeSession('koala-result'); setView('home') }} account={account} onAccountChange={handleAccountChange} onOpenAccount={() => { setReturnToResultAfterAccount(true); setView('home'); setAccountRequestId((current) => current + 1) }} /></Suspense>}
     </div>
   )
 }

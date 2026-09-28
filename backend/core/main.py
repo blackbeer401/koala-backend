@@ -1,8 +1,11 @@
 import logging
+from contextlib import asynccontextmanager
 from threading import Lock
 from time import perf_counter
 
 from fastapi import FastAPI
+from database import SessionLocal
+from scripts.seed_activity_categories import seed_activity_categories
 from adventure_routes import router as adventure_router
 from auth_routes import router as auth_router
 from course_routes import (
@@ -66,8 +69,17 @@ from course_order_optimizer import optimize_course_order
 performance_logger = logging.getLogger("uvicorn.error")
 
 
+# 애플리케이션에서 사용하는 활동 분류를 시작 시 DB 기준값과 동기화한다.
+# 이 기준값이 빠지면 취향 저장 API가 선택된 활동을 거부할 수 있다.
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    with SessionLocal() as db:
+        seed_activity_categories(db)
+    yield
+
+
 # 1. FastAPI 앱 생성
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 app.include_router(adventure_router)
 app.include_router(auth_router)
 app.include_router(course_router)
@@ -105,6 +117,7 @@ def recommend(
         name: {"seconds": 0.0, "calls": 0}
         for name in (
             "intent_llm",
+            "geocode",
             "proactive",
             "proactive_travel",
             "region_travel",
@@ -147,7 +160,7 @@ def recommend(
                 "message_llm",
                 generate_recommendation_message,
             ),
-            search_location_fn=search_location,
+            search_location_fn=measured("geocode", search_location),
             get_travel_fn=measured("region_travel", get_travel),
             load_poi_candidates_fn=measured("poi_load", load_poi_candidates),
             load_poi_activity_scores_fn=measured(
@@ -169,12 +182,14 @@ def recommend(
         )
     finally:
         performance_logger.info(
-            "[PERFORMANCE] total=%.4fs intent_llm=%.4fs "
+            "[PERFORMANCE] total=%.4fs intent_llm=%.4fs geocode=%.4fs calls=%d "
             "proactive=%.4fs proactive_travel=%.4fs calls=%d "
             "region_travel=%.4fs calls=%d congestion=%.4fs calls=%d "
             "message_llm=%.4fs activity_score=%.4fs poi_load=%.4fs",
             perf_counter() - total_started,
             metrics["intent_llm"]["seconds"],
+            metrics["geocode"]["seconds"],
+            metrics["geocode"]["calls"],
             metrics["proactive"]["seconds"],
             metrics["proactive_travel"]["seconds"],
             metrics["proactive_travel"]["calls"],

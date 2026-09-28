@@ -14,15 +14,50 @@ function formatTransport(transport) {
   return transport.transfers > 0 ? `${label} · 환승 ${transport.transfers}회` : label
 }
 
+function normalizeCongestion(candidate) {
+  const officialLevel = congestionLabels[
+    candidate.forecast_congestion?.FCST_CONGEST_LVL
+  ];
+  if (officialLevel) {
+    return { level: officialLevel, source: "실시간 공식 예보" };
+  }
+
+  if (
+    candidate.congestion_source === "ml_relative_population" &&
+    candidate.congestion_status === "ok" &&
+    candidate.congestion_score != null &&
+    Number.isFinite(Number(candidate.congestion_score))
+  ) {
+    const score = Number(candidate.congestion_score);
+    const level = score >= 4.2
+      ? "여유"
+      : score >= 3.2
+        ? "보통"
+        : score >= 2.2
+          ? "약간 붐빔"
+          : "붐빔";
+    return { level, source: "과거 생활인구 패턴 추정" };
+  }
+
+  return {
+    level: "알 수 없음",
+    source: candidate.congestion_source === "ml_relative_population"
+      ? "예측 자료 부족"
+      : "예보 자료 없음",
+  };
+}
+
 export function normalizeCandidate(candidate, rank) {
   if (!candidate) return null
   const travelMinutes = (candidate.start_to_candidate_travel_minutes ?? 0) + (candidate.candidate_to_end_travel_minutes ?? 0)
+  const congestion = normalizeCongestion(candidate)
   return {
     rank,
     name: candidate.AREA_NM ?? '추천 지역',
     score: typeof candidate.final_score === 'number' ? candidate.final_score.toFixed(1) : null,
     activityScore: candidate.activity_match_score ?? null,
-    congestion: congestionLabels[candidate.forecast_congestion?.FCST_CONGEST_LVL] ?? '알 수 없음',
+    congestion: congestion.level,
+    congestionSource: congestion.source,
     travelMinutes,
     fromStartMinutes: candidate.start_to_candidate_travel_minutes ?? 0,
     toNextMinutes: candidate.candidate_to_end_travel_minutes ?? 0,

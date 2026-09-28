@@ -5,7 +5,8 @@
 """
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
+from math import pow
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -18,10 +19,14 @@ EVENT_WEIGHTS = {
     "place_view": 0.25,
     "place_select": 2.0,
     "favorite": 5.0,
+    "like": 3.0,
+    "dislike": -3.0,
     "hide": -5.0,
     "course_confirm": 4.0,
     "course_open": 2.0,
 }
+FEEDBACK_EVENTS = {"favorite", "like", "dislike", "hide"}
+INTERACTION_HALF_LIFE_DAYS = 60
 
 
 def day_part(hour: int) -> str:
@@ -37,17 +42,17 @@ def day_part(hour: int) -> str:
 
 
 def _levels(scores: dict[str, float]) -> dict[str, int]:
-    """점수가 충분한 활동만 4~5 선호도로 승격해 과학습을 막는다."""
+    """강한 긍정·부정 신호만 선호도로 반영해 과학습을 막는다."""
     if not scores:
         return {}
-    maximum = max(scores.values(), default=0)
-    if maximum <= 0:
-        return {}
-    return {
-        activity: 5 if score >= maximum * 0.75 else 4
-        for activity, score in scores.items()
-        if score >= 2
-    }
+    positive_maximum = max((score for score in scores.values() if score > 0), default=0)
+    result = {}
+    for activity, score in scores.items():
+        if score <= -2:
+            result[activity] = 1
+        elif score >= 2:
+            result[activity] = 5 if score >= positive_maximum * 0.75 else 4
+    return result
 
 
 def build_personalization_profile(db: Session, user_id: int) -> dict:
@@ -61,10 +66,32 @@ def build_personalization_profile(db: Session, user_id: int) -> dict:
     )
     activity_scores = defaultdict(float)
     context_scores = defaultdict(lambda: defaultdict(float))
+    now = datetime.now(timezone.utc)
+    seen_feedback = set()
     for item in interactions:
         if not item.category:
             continue
         weight = EVENT_WEIGHTS.get(item.event_type, 0)
+        if weight == 0:
+            continue
+
+        # 좋아요/싫어요/숨김은 같은 장소에서 가장 최근 선택만 사용한다.
+        # 과거의 좋아요가 이후 싫어요를 상쇄하지 않게 한다.
+        if item.event_type in FEEDBACK_EVENTS:
+            place_identity = item.place_key or item.place_name
+            if place_identity:
+                feedback_key = (place_identity, item.category)
+                if feedback_key in seen_feedback:
+                    continue
+                seen_feedback.add(feedback_key)
+
+        # 최근 행동을 더 강하게 반영하되 시간이 지나면 영향이 자연스럽게 줄어든다.
+        created_at = item.created_at
+        if created_at is not None:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            age_days = max(0.0, (now - created_at.astimezone(timezone.utc)).total_seconds() / 86400)
+            weight *= pow(0.5, age_days / INTERACTION_HALF_LIFE_DAYS)
         activity_scores[item.category] += weight
         if item.context_hour is not None and item.context_day:
             key = f"{item.context_day}:{day_part(item.context_hour)}"

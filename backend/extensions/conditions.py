@@ -5,6 +5,22 @@ from zoneinfo import ZoneInfo
 from models import RecommendRequest, StructuredConditions
 
 
+TIME_PERIOD_RANGES = {
+    "morning": (6 * 60, 11 * 60),
+    "lunch": (11 * 60, 15 * 60),
+    "evening": (18 * 60, 24 * 60),
+    "am": (6 * 60, 12 * 60),
+    "pm": (12 * 60, 22 * 60),
+}
+
+
+def _seoul_now(current_datetime: datetime | None = None) -> datetime:
+    now = current_datetime or datetime.now(ZoneInfo("Asia/Seoul"))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    return now.astimezone(ZoneInfo("Asia/Seoul"))
+
+
 def extract_explicit_current_location(user_message: str | None):
     """LLM이 놓친 현재·미래의 명시적 출발지를 보수적으로 복구한다."""
     if not user_message:
@@ -76,10 +92,33 @@ def extract_explicit_end_location(user_message: str | None):
 
 
 def extract_explicit_duration_minutes(user_message: str | None):
-    """LLM이 놓친 '한 3시간?', '2시간 정도' 같은 총 여유시간을 복구한다."""
+    """LLM이 놓친 명시적 희망 활동시간을 복구한다.
+
+    가용시간 표현("2시간 비어", "2시간 시간 있어")은 종료시각으로
+    postprocess되므로 이 함수가 희망 활동시간으로 다시 분류하지 않는다.
+    """
     if not user_message:
         return None
     normalized = " ".join(user_message.strip().split())
+    if re.search(
+        r"(?:시간\s*)?(?:있어|있다|있음|있는데|비어|비었|여유\s*있|"
+        r"남았|남아|가능해|가능하고|밖에.{0,4}없)",
+        normalized,
+    ):
+        return None
+
+    # 숫자만 언급한 "2시간 뒤" 같은 시각 표현은 활동시간으로 복구하지 않는다.
+    duration_match = re.search(
+        r"(?:\d+\s*시간(?:\s*(?:반|\d+\s*분))?|\d+\s*분|"
+        r"(?:한|두|세|네)\s*시간(?:\s*반)?)",
+        normalized,
+    )
+    if duration_match and re.match(
+        r"\s*(?:뒤|후|후에|까지|이후)",
+        normalized[duration_match.end():],
+    ):
+        return None
+
     word_numbers = {"한": 1, "두": 2, "세": 3, "네": 4}
     hour_match = re.search(r"(?:한\s*)?(\d{1,2}|한|두|세|네)\s*시간", normalized)
     minute_match = re.search(r"(\d{1,3})\s*분(?:\s*(?:정도|쯤|가량))?", normalized)
@@ -294,7 +333,8 @@ def resolve_target_location(
 
 # 3. 추천 계산에 사용할 시작시간 결정
 def resolve_start_time(
-    conditions: StructuredConditions
+    conditions: StructuredConditions,
+    current_datetime: datetime | None = None,
 ):
     """
     사용자가 시작시간을 직접 말하면 해당 시간을 사용하고,
@@ -308,10 +348,20 @@ def resolve_start_time(
             "start_time": conditions.start_time
         }
 
-    # 별도 시작시간이 없으면 현재 한국 시간 사용
-    current_time = datetime.now(
-        ZoneInfo("Asia/Seoul")
-    ).strftime("%H:%M")
+    now = _seoul_now(current_datetime)
+    if conditions.start_time_period is not None:
+        period_start, period_end = TIME_PERIOD_RANGES[conditions.start_time_period]
+        current_minutes = now.hour * 60 + now.minute
+        if current_minutes < period_start:
+            return {
+                "source": "period",
+                "start_time": f"{period_start // 60:02d}:{period_start % 60:02d}",
+            }
+        if current_minutes < period_end:
+            return {"source": "period", "start_time": now.strftime("%H:%M")}
+
+    # 지정한 시간대가 이미 지난 경우 오늘의 현재 시각을 쓴다.
+    current_time = now.strftime("%H:%M")
 
     return {
         "source": "current",
@@ -350,7 +400,8 @@ def resolve_end_location(
 
 # 5. 종료시간 또는 다음 일정시간 결정
 def resolve_end_time(
-    conditions: StructuredConditions
+    conditions: StructuredConditions,
+    current_datetime: datetime | None = None,
 ):
     """
     사용자가 종료시간 또는 다음 일정시간을 말한 경우
@@ -365,6 +416,26 @@ def resolve_end_time(
             "end_time": conditions.end_time
         }
 
+    if conditions.end_time_period is not None:
+        now = _seoul_now(current_datetime)
+        period_start, period_end = TIME_PERIOD_RANGES[conditions.end_time_period]
+        current_minutes = now.hour * 60 + now.minute
+        if current_minutes < period_start:
+            boundary = period_start
+        elif current_minutes < period_end:
+            boundary = period_end
+        else:
+            # 이미 지난 시간대를 다음 날 일정으로 잘못 해석하지 않는다.
+            return {"source": "period_passed_today", "end_time": None}
+        return {
+            "source": "period",
+            "end_time": (
+                "00:00"
+                if boundary >= 24 * 60
+                else f"{boundary // 60:02d}:{boundary % 60:02d}"
+            ),
+        }
+
     return {
         "source": "none",
         "end_time": None
@@ -374,7 +445,8 @@ def resolve_end_time(
 # 6. HH:MM 형태의 시간을 실제 datetime으로 변환
 def resolve_datetimes(
     start_time: dict,
-    end_time: dict
+    end_time: dict,
+    current_datetime: datetime | None = None,
 ):
     """
     시작시간과 종료시간을 실제 datetime 객체로 변환한다.
@@ -395,9 +467,7 @@ def resolve_datetimes(
     → 오늘 23:00 ~ 다음 날 01:00
     """
 
-    now = datetime.now(
-        ZoneInfo("Asia/Seoul")
-    )
+    now = _seoul_now(current_datetime)
 
     # 시작시간을 오늘 날짜의 datetime으로 변환
     start_datetime = datetime.strptime(

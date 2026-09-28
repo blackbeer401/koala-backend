@@ -103,7 +103,7 @@ export default function TimeWheelColumn({ label, options, value, onChange }) {
             role="option"
             aria-selected={option === value}
             className={option === value ? "is-selected" : ""}
-            onClick={(event) => {
+            onClick={() => {
               if (dragRef.current.moved) {
                 dragRef.current.moved = false;
                 return;

@@ -84,6 +84,8 @@ class D4DirectCongestionAdapter:
         self._provider = provider
         self._population_loader = population_loader
         self._artifact_dir = artifact_dir
+        # 한 추천 요청에서 여러 행정동을 추론할 때 같은 D-4 history를 재사용한다.
+        self._population_cache: dict[str, pd.DataFrame] = {}
 
     def _provider_or_fallback(self) -> D4Provider | None:
         if self._provider is not None:
@@ -123,12 +125,20 @@ class D4DirectCongestionAdapter:
 
         if population is None:
             try:
-                population = self._population_loader(model_issue_time)
+                cache_key = model_issue_time.isoformat()
+                population = self._population_cache.get(cache_key)
+                if population is None:
+                    population = self._population_loader(model_issue_time)
+                    self._population_cache[cache_key] = population
             except (PopulationHistoryError, OSError, ValueError):
                 return _fallback("population_source_failure")
 
         try:
-            result = provider.predict(local_resd, model_issue_time, population)
+            result = provider.predict(
+                local_resd,
+                model_issue_time,
+                population.copy(deep=True),
+            )
         except (OSError, RuntimeError, TypeError, ValueError):
             return _fallback("inference_failure")
         if not isinstance(result, dict):

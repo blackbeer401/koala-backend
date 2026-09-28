@@ -3,6 +3,15 @@ import {
   PROMPT_EXAMPLES,
   RECOMMENDATION_GUIDES,
 } from "../../utils/promptGuidance";
+import locationIcon from "../../assets/images/prompt-help/location.png";
+import timeIcon from "../../assets/images/prompt-help/time.png";
+import cafeIcon from "../../assets/images/prompt-help/cafe.png";
+
+const PROMPT_HELP_STEPS = [
+  { label: "어디서", example: "홍대역", icon: locationIcon },
+  { label: "얼마나", example: "2시간", icon: timeIcon },
+  { label: "무엇을", example: "카페", icon: cafeIcon },
+];
 
 function PromptHelpDialog({ open, onClose, onSelectExample }) {
   const closeButtonRef = useRef(null);
@@ -35,13 +44,11 @@ function PromptHelpDialog({ open, onClose, onSelectExample }) {
         aria-labelledby="prompt-help-title"
         aria-describedby="prompt-help-description"
       >
-        <header>
-          <span aria-hidden="true">?</span>
+        <header className="prompt-help-header">
           <div>
-            <h2 id="prompt-help-title">질문 작성 안내</h2>
-            <p id="prompt-help-description">
-              아래 항목을 한 문장에 적으면 조건에 맞는 코스를 추천합니다.
-            </p>
+            <p className="prompt-help-eyebrow">쉽게 물어보세요</p>
+            <h2 id="prompt-help-title">무엇을 적으면 될까요?</h2>
+            <p id="prompt-help-description">지역, 시간, 하고 싶은 일만 알려주세요.</p>
           </div>
           <button
             ref={closeButtonRef}
@@ -54,86 +61,101 @@ function PromptHelpDialog({ open, onClose, onSelectExample }) {
           </button>
         </header>
 
-        <div className="prompt-help-formula" aria-label="질문 구성 방법">
-          <span><b>1</b> 어디에서</span>
-          <i aria-hidden="true">+</i>
-          <span><b>2</b> 얼마나</span>
-          <i aria-hidden="true">+</i>
-          <span><b>3</b> 무엇을</span>
-        </div>
-
-        <div className="prompt-help-spec">
-          <strong>입력 항목</strong>
-          <dl>
+        <div className="prompt-help-hero">
+          <div className="prompt-help-steps" aria-label="지역, 시간, 활동 순서로 입력">
             <div>
-              <dt><b>필수</b> 장소</dt>
-              <dd>현재 위치 또는 추천받고 싶은 지역</dd>
+              <img src={PROMPT_HELP_STEPS[0].icon} alt="" />
+              <b>{PROMPT_HELP_STEPS[0].label}</b>
+              <small>{PROMPT_HELP_STEPS[0].example}</small>
             </div>
+            <i aria-hidden="true">+</i>
             <div>
-              <dt><b>필수</b> 시간</dt>
-              <dd>사용 가능한 시간 또는 다음 일정 시각</dd>
+              <img src={PROMPT_HELP_STEPS[1].icon} alt="" />
+              <b>{PROMPT_HELP_STEPS[1].label}</b>
+              <small>{PROMPT_HELP_STEPS[1].example}</small>
             </div>
+            <i aria-hidden="true">+</i>
             <div>
-              <dt><b>권장</b> 활동</dt>
-              <dd>식사, 카페, 전시, 산책처럼 하고 싶은 일</dd>
+              <img src={PROMPT_HELP_STEPS[2].icon} alt="" />
+              <b>{PROMPT_HELP_STEPS[2].label}</b>
+              <small>{PROMPT_HELP_STEPS[2].example}</small>
             </div>
-            <div>
-              <dt><b>선택</b> 추가 조건</dt>
-              <dd>이동수단, 실내·실외, 동행인, 분위기</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="prompt-help-rules">
-          <strong>코알라는 이렇게 이해합니다</strong>
-          <ul>
-            <li><b>“신림역에서”</b>는 활동할 지역으로 인식합니다.</li>
-            <li><b>“3시간 동안”</b>은 이동과 체류를 포함한 전체 시간입니다.</li>
-            <li><b>“밥 먹고 카페”</b>처럼 적으면 작성한 순서를 우선합니다.</li>
-            <li><b>“8시까지 잠실”</b>은 다음 일정의 시각과 목적지로 인식합니다.</li>
-          </ul>
-        </div>
-
-        <div className="prompt-help-features">
-          <div className="prompt-help-feature-heading">
-            <strong>추천 기능 안내</strong>
-            <small>상황에 맞는 방식을 선택하세요.</small>
           </div>
-          <div className="prompt-help-feature-list">
-            {RECOMMENDATION_GUIDES.map((guide) => (
-              <article key={guide.id}>
-                <i aria-hidden="true">{guide.icon}</i>
-                <div>
-                  <strong>{guide.title}</strong>
-                  <b>{guide.summary}</b>
-                  <p>{guide.description}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          <p className="prompt-help-example">
+            “홍대역인데 <b>2시간</b> 비어, <b>카페</b> 가고 싶어”
+          </p>
+          <p className="prompt-help-caption">
+            이동시간과 머물 수 있는 시간은 코알라가 계산해요.
+          </p>
         </div>
 
-        <div className="prompt-help-examples">
-          <div className="prompt-help-example-heading">
-            <strong>질문 예시</strong>
-            <small>문장을 선택하면 입력창에 반영됩니다.</small>
-          </div>
-          {PROMPT_EXAMPLES.map((example) => (
-            <button
-              key={example.id}
-              type="button"
-              onClick={() => onSelectExample(example.text)}
-            >
-              <small>{example.label}</small>
-              <span>{example.text}</span>
-              <i aria-hidden="true">→</i>
-            </button>
-          ))}
+        <div className="prompt-help-details-list">
+          <details className="prompt-help-details">
+            <summary>
+              <span>더 정확하게 추천받는 방법</span>
+              <small>필수 정보와 추가 조건</small>
+              <i aria-hidden="true" />
+            </summary>
+            <div className="prompt-help-detail-body">
+              <div>
+                <b>지역</b>
+                <span>현재 위치를 쓰거나 가고 싶은 동네를 적어요.</span>
+              </div>
+              <div>
+                <b>시간</b>
+                <span>“2시간 비어” 또는 “8시까지 잠실”처럼 적어요.</span>
+              </div>
+              <div>
+                <b>하고 싶은 일</b>
+                <span>“밥 먹고 카페”처럼 순서대로 적으면 반영해요.</span>
+              </div>
+              <p>이동수단, 실내·실외, 동행인, 분위기는 원할 때만 덧붙이세요.</p>
+            </div>
+          </details>
+
+          <details className="prompt-help-details">
+            <summary>
+              <span>추천 방식 알아보기</span>
+              <small>상황에 맞는 기능 안내</small>
+              <i aria-hidden="true" />
+            </summary>
+            <div className="prompt-help-feature-list">
+              {RECOMMENDATION_GUIDES.map((guide) => (
+                <article key={guide.id}>
+                  <i aria-hidden="true">{guide.icon}</i>
+                  <div>
+                    <strong>{guide.title}</strong>
+                    <p>{guide.summary}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </details>
+
+          <details className="prompt-help-details">
+            <summary>
+              <span>예시 문장으로 시작하기</span>
+              <small>누르면 입력창에 바로 들어가요</small>
+              <i aria-hidden="true" />
+            </summary>
+            <div className="prompt-help-examples">
+              {PROMPT_EXAMPLES.map((example) => (
+                <button
+                  key={example.id}
+                  type="button"
+                  onClick={() => onSelectExample(example.text)}
+                >
+                  <small>{example.label}</small>
+                  <span>{example.text}</span>
+                  <i aria-hidden="true">→</i>
+                </button>
+              ))}
+            </div>
+          </details>
         </div>
 
         <p className="prompt-help-note">
-          모든 항목을 적지 않아도 됩니다. 필요한 핵심 조건이 없으면 추천 전에
-          코알라가 한 번 더 확인합니다.
+          완벽하게 쓰지 않아도 괜찮아요. 필요한 내용이 빠지면 코알라가 다시 물어볼게요.
         </p>
       </section>
     </div>

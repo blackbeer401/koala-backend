@@ -1,0 +1,74 @@
+.seoul-explorer { display:grid; gap:15px; padding:18px; border:1px solid #e1eaf6; border-radius:20px; background:linear-gradient(160deg,#f7fbff,#fff 58%); }
+.seoul-explorer-loading { margin:0; padding:28px 12px; color:#587694; text-align:center; font-size:14px; }
+.seoul-explorer-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.seoul-explorer-heading > div { display:grid; gap:4px; }
+.seoul-eyebrow,.seoul-region-kicker { color:#568bd2; font-size:10px; font-weight:950; letter-spacing:.12em; }
+.seoul-explorer-heading h3 { margin:0; color:#1e3e64; font-size:22px; letter-spacing:-.04em; }
+.seoul-explorer-heading p { margin:0; color:#657c96; font-size:13px; line-height:1.5; }
+.seoul-progress-count { color:#2475dc; font-size:25px; font-weight:950; white-space:nowrap; }
+.seoul-progress-count small { color:#6a809b; font-size:12px; font-weight:750; }
+.seoul-progress-track { height:9px; overflow:hidden; border-radius:99px; background:#e8eff7; }
+.seoul-progress-track span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#62b4ff,#2478ee); transition:width .25s ease; }
+.seoul-explorer-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.seoul-view-toggle,.seoul-filter-tabs { display:flex; gap:5px; padding:4px; border:1px solid #e3ebf5; border-radius:13px; background:#f4f8fd; }
+.seoul-view-toggle button,.seoul-filter-tabs button { display:flex; min-height:40px; align-items:center; justify-content:center; gap:6px; padding:0 11px; border:0; border-radius:9px; color:#667e99; background:transparent; font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.seoul-view-toggle button.is-active,.seoul-filter-tabs button.is-active { color:#236dcd; background:white; box-shadow:0 2px 7px #244a711c; }
+.seoul-view-toggle img { width:25px; height:25px; object-fit:contain; }
+.seoul-legend { display:flex; align-items:center; gap:6px; color:#647b95; font-size:11px; font-weight:750; white-space:nowrap; }
+.seoul-legend i { width:10px; height:10px; border-radius:3px; background:#3288f5; }
+.seoul-legend i.is-locked { margin-left:5px; background:#d7e0eb; }
+.seoul-map-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(180px,.85fr); gap:12px; align-items:stretch; }
+.seoul-map-canvas { position:relative; display:grid; min-height:290px; place-items:center; overflow:hidden; border:1px solid #e3edf7; border-radius:17px; background:radial-gradient(ellipse at 49% 50%,#eaf5ff 0,#f8fbff 64%,#fff 100%); }
+.seoul-map-canvas svg { width:100%; height:100%; max-height:355px; padding:12px; overflow:visible; }
+.seoul-district-shape { stroke:#fff; stroke-width:1.7; vector-effect:non-scaling-stroke; cursor:pointer; transition:fill .16s ease,stroke .16s ease,filter .16s ease; }
+.seoul-district-shape.is-locked { fill:#d6e0eb; }
+.seoul-district-shape.is-unlocked { fill:#65a9fb; }
+.seoul-district-shape:hover,.seoul-district-shape:focus-visible { fill:#a9d6ff; stroke:#2478ed; stroke-width:2.8; outline:none; }
+.seoul-district-shape:focus { outline:none; }
+.seoul-district-shape.is-selected { fill:#2478ed; stroke:#135ec5; stroke-width:3; filter:drop-shadow(0 1px 2px #2862aa70); }
+.seoul-district-shape.is-newly-unlocked { animation:seoul-region-unlock 1.6s ease-out; transform-box:fill-box; transform-origin:center; }
+.seoul-district-hover-label { fill:#173b64; font-size:19px; font-weight:900; text-anchor:middle; dominant-baseline:central; paint-order:stroke; stroke:#fff; stroke-width:6px; stroke-linejoin:round; pointer-events:none; filter:drop-shadow(0 1px 2px rgba(21,52,88,.22)); }
+@keyframes seoul-region-unlock { 0% { fill:#ffe38a; stroke:#f4a923; stroke-width:4; filter:drop-shadow(0 0 9px #ffcc47); } 48% { fill:#8ac3ff; stroke:#2478ed; stroke-width:3; filter:drop-shadow(0 0 7px #4e9aff); } 100% { fill:#65a9fb; stroke:#fff; stroke-width:1.7; filter:none; } }
+.seoul-zoom-controls { position:absolute; right:9px; bottom:9px; display:grid; gap:5px; }
+.seoul-zoom-controls button { display:grid; width:39px; height:39px; place-items:center; border:1px solid #e2ebf5; border-radius:12px; background:#fff; box-shadow:0 2px 8px #244a7117; cursor:pointer; }
+.seoul-zoom-controls img { width:29px; height:29px; object-fit:contain; }
+.seoul-region-detail { display:flex; min-height:220px; flex-direction:column; align-items:flex-start; justify-content:center; gap:8px; padding:17px; border:1px solid #e1eaf5; border-radius:17px; background:#fff; }
+.seoul-region-detail-icon { width:45px; height:45px; object-fit:contain; }
+.seoul-region-detail h4 { margin:0; color:#1f4169; font-size:23px; letter-spacing:-.04em; }
+.seoul-region-detail p,.seoul-region-detail small,.seoul-region-date { margin:0; color:#5f7691; font-size:12px; line-height:1.55; }
+.seoul-region-detail > small { color:#8394a8; }
+.seoul-region-course-count { color:#2879dc; font-size:14px; }
+.seoul-region-places { width:100%; margin-top:4px; padding-top:10px; border-top:1px solid #edf1f6; }
+.seoul-region-places b { color:#536d89; font-size:11px; }
+.seoul-region-places p { margin-top:4px; }
+.seoul-region-detail.is-empty { align-items:center; text-align:center; }
+.seoul-region-detail.is-empty img { width:58px; height:58px; object-fit:contain; }
+.seoul-region-detail.is-empty b { color:#315577; font-size:14px; }
+.seoul-list-layout { display:grid; gap:10px; }
+.seoul-filter-tabs { justify-self:start; }
+.seoul-filter-tabs button { min-height:36px; font-size:12px; }
+.seoul-district-list { display:grid; grid-template-columns:1fr 1fr; gap:7px; padding:1px; }
+.seoul-district-row { display:flex; min-width:0; min-height:65px; align-items:center; gap:8px; padding:8px; border:1px solid #e7edf5; border-radius:13px; text-align:left; background:#fff; cursor:pointer; }
+.seoul-district-row > img { width:38px; height:38px; flex:none; object-fit:contain; }
+.seoul-district-row > span:nth-child(2) { display:grid; min-width:0; gap:3px; }
+.seoul-district-row b { color:#2d4c6c; font-size:13px; }
+.seoul-district-row small { overflow:hidden; color:#7b8da2; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.seoul-status { margin-left:auto; color:#8392a3; font-size:10px; font-weight:850; }
+.seoul-status.is-unlocked { color:#2775d5; }
+.seoul-explorer-footnote { display:flex; align-items:center; gap:7px; margin:0; color:#778aa1; font-size:11px; line-height:1.45; }
+.seoul-explorer-footnote img { width:25px; height:25px; flex:none; object-fit:contain; }
+@media (max-width:640px) {
+  .seoul-explorer { gap:12px; padding:14px 12px; }
+  .seoul-explorer-heading h3 { font-size:20px; }
+  .seoul-explorer-heading p { max-width:230px; font-size:12px; }
+  .seoul-progress-count { font-size:22px; }
+  .seoul-map-layout { grid-template-columns:1fr; }
+  .seoul-map-canvas { min-height:260px; }
+  .seoul-region-detail { min-height:unset; }
+  .seoul-legend { font-size:10px; }
+  .seoul-view-toggle button { min-height:38px; padding:0 8px; }
+  .seoul-view-toggle img { width:22px; height:22px; }
+  .seoul-district-list { grid-template-columns:1fr; }
+  .seoul-district-row { min-height:58px; }
+  .seoul-explorer-footnote { font-size:10px; }
+}

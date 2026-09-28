@@ -1,5 +1,6 @@
 from typing import Annotated, Any, Literal
 from datetime import datetime
+import string
 
 from pydantic import (
     BaseModel,
@@ -654,8 +655,9 @@ class SignupRequest(BaseModel):
         max_length=255,
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
     )
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=128)
     nickname: str = Field(min_length=1, max_length=50)
+    email_verification_code: str = Field(pattern=r"^\d{6}$")
 
     @field_validator("email", "nickname", mode="before")
     @classmethod
@@ -667,6 +669,15 @@ class SignupRequest(BaseModel):
     def normalize_email(cls, value: str):
         return value.lower()
 
+    @field_validator("password")
+    @classmethod
+    def validate_signup_password(cls, value: str):
+        if not any(char in string.ascii_letters for char in value):
+            raise ValueError("비밀번호에 영문자를 하나 이상 포함해 주세요.")
+        if not any(char in string.punctuation for char in value):
+            raise ValueError("비밀번호에 특수문자를 하나 이상 포함해 주세요.")
+        return value
+
 
 class LoginRequest(BaseModel):
     email: str = Field(
@@ -675,6 +686,30 @@ class LoginRequest(BaseModel):
         pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
     )
     password: str = Field(min_length=1)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class RecoveryEmailRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class UsernameRecoveryVerifyRequest(RecoveryEmailRequest):
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class PasswordResetVerifyRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -692,6 +727,7 @@ class UserResponse(BaseModel):
 
     id: int
     email: str
+    recovery_email_masked: str | None = None
     nickname: str
     created_at: datetime
 

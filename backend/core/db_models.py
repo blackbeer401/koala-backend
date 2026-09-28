@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -11,6 +11,7 @@ class Base(DeclarativeBase):
 # users 테이블과 연결되는 SQLAlchemy 모델
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("recovery_email", name="uq_users_recovery_email"),)
 
     id: Mapped[int] = mapped_column(
         BIGINT(unsigned=True),
@@ -22,6 +23,25 @@ class User(Base):
         String(255),
         unique=True,
         nullable=False,
+    )
+
+    recovery_email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    @property
+    def recovery_email_masked(self) -> str | None:
+        if not self.recovery_email or "@" not in self.recovery_email:
+            return None
+        local, domain = self.recovery_email.split("@", 1)
+        return f"{local[:1]}{'*' * max(2, min(6, len(local) - 1))}@{domain}"
+
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
 
     password_hash: Mapped[str] = mapped_column(
@@ -45,6 +65,39 @@ class User(Base):
         nullable=False,
         server_default=func.current_timestamp(),
         server_onupdate=func.current_timestamp(),
+    )
+
+
+class AccountRecoveryCode(Base):
+    """One-time verification codes for account recovery and signup."""
+
+    __tablename__ = "account_recovery_codes"
+    __table_args__ = (
+        Index("ix_recovery_target_purpose_created", "target_email", "purpose", "created_at"),
+        Index("ix_recovery_ip_created", "request_ip", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        primary_key=True,
+        autoincrement=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        BIGINT(unsigned=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    expires_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    consumed_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.current_timestamp(),
     )
 
 
@@ -179,4 +232,4 @@ class UserActivityPreference(Base):
         server_onupdate=func.current_timestamp(),
     )
 
-    
+

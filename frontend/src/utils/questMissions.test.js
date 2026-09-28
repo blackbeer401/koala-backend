@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDailyCourseQuestPlan,
+  getCourseQuestSignature,
   getDailyQuestStorageKeys,
   getQuestProgressKey,
   questForPlace,
@@ -61,6 +62,16 @@ test("한 곳 코스는 보너스 없이 메인 미션 하나만 만든다", () 
   assert.equal(plan.length, 1);
   assert.equal(plan[0].slot, "main");
   assert.equal(plan[0].placeIndex, 0);
+});
+
+test("퀘스트 계획은 확정 코스의 장소 구성이 바뀌면 다른 코스 서명을 갖는다", () => {
+  const firstCourse = [place("식당", "food"), place("카페", "cafe")];
+  const nextCourse = [place("전시관", "culture"), place("산책로", "walk")];
+  assert.notEqual(getCourseQuestSignature(firstCourse), getCourseQuestSignature(nextCourse));
+  assert.equal(
+    createDailyCourseQuestPlan(firstCourse, "2026-09-27")[0].courseSignature,
+    getCourseQuestSignature(firstCourse),
+  );
 });
 
 test("퀘스트 저장 키는 사용자·날짜별로 분리되고 이전 버전 저장값과 격리된다", () => {

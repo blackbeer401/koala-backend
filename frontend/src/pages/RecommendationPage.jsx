@@ -93,6 +93,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
   const [gamificationCourseReady, setGamificationCourseReady] = useState(() => Boolean(restoredCourse?.gamification_course_id));
   const [gamificationNotice, setGamificationNotice] = useState("");
   const [questRewardResults, setQuestRewardResults] = useState({});
+  const [questsEnabled, setQuestsEnabled] = useState(false);
   const gamificationNoticeTimerRef = useRef(null);
   const completionRewardedRef = useRef(new Set());
   const questRewardedRef = useRef(new Set());
@@ -530,6 +531,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
     visiblePlaces,
     adventureExperience,
     courseConfirmed,
+    questsEnabled,
     mysteryRevealed,
     guideStep,
     userKey: account?.user?.id ?? "guest",
@@ -1151,6 +1153,8 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                     arrivalQuestStatus={arrivalQuest ? questProgress[arrivalQuest.id] : null}
                     arrivalQuestReward={arrivalQuest ? questRewardResults[arrivalQuest.id] : null}
                     onQuestProgressChange={handleQuestProgressChange}
+                    questsEnabled={questsEnabled}
+                    onToggleQuests={setQuestsEnabled}
                     hasEndDestination={Boolean(result.mapContext?.end)}
                     setMysteryRevealed={setMysteryRevealed}
                     resetCourseSelection={resetCourseSelection}
@@ -1174,6 +1178,9 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                     onFocusStop={setFocusedStopIndex}
                     adventureMode={adventureExperience?.mode}
                     questPlans={questPlans}
+                    questsEnabled={questsEnabled}
+                    onToggleQuests={setQuestsEnabled}
+                    account={account}
                     onResetSelection={resetCourseSelection}
                     isAutoCourse={response?._client_mode === "auto-course"}
                     onReturnToAutoCourses={returnToAutoCourses}

@@ -63,7 +63,7 @@ function TravelProgressCard({ gamification, error, onEquipTitle }) {
         <span style={{ width: `${barWidth}%` }} />
       </div>
       <div className="travel-progress-meta"><b>{gamification.total_xp.toLocaleString()} XP</b><span>{gamification.xp_to_next_rank ? `다음 등급까지 ${gamification.xp_to_next_rank} XP` : "최고 등급을 달성했어요"}</span></div>
-      <small className="travel-reward-rules">코스 확정 +10 · 안내 완료 +15 · 퀘스트 +5 · 처음 여는 지역 +20 XP<br />코스 확정과 안내 완료는 하루 3회, 퀘스트는 하루 최대 30 XP까지 적립돼요.</small>
+      <small className="travel-reward-rules">코스 확정 +10 · 안내 완료 +15 · 퀘스트 메인 +10 / 보너스 +5 · 처음 여는 지역 +20 XP<br />코스 확정과 안내 완료는 하루 3회, 퀘스트는 하루 최대 15 XP까지 적립돼요.</small>
       <label className="travel-title-picker">메인 화면 칭호
         <select value={gamification.equipped_title?.id ?? ""} onChange={(event) => onEquipTitle(event.target.value)} aria-label="메인 화면에 표시할 칭호">
           {(gamification.unlocked_titles ?? []).map((title) => <option value={title.id} key={title.id}>{title.name}</option>)}
@@ -452,7 +452,7 @@ export default function AccountModal({
 
   return createPortal((
     <div
-      className="account-modal"
+      className={`account-modal${account.user ? "" : " account-modal--auth"}`}
       role="dialog"
       aria-modal="true"
       onClick={(event) => {

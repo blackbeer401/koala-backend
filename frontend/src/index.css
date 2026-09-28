@@ -193,9 +193,9 @@ button, textarea, input { font: inherit; }
 @media (max-width: 899px) {
   .home-page--sheet { height:calc(100dvh - max(68px,env(safe-area-inset-top))); padding:32px 20px max(16px,env(safe-area-inset-bottom)); }
   .home-page--sheet .home-intro { display:none; }
-  .home-page--sheet .home-header { min-height:34px; }
+  .home-page--sheet .home-header { min-height:44px; align-items:center; }
   .home-page--sheet .home-brand { font-size:18px; }
-  .home-page--sheet .account-button { min-height:34px; padding:0 11px; }
+  .home-page--sheet .account-button { align-self:center; align-content:center; align-items:center; justify-content:center; min-height:42px; padding:0 11px; }
   .home-page--sheet .location-card { min-height:50px; margin-top:14px; padding:8px 10px; border-radius:14px; }
   .home-page--sheet .location-card strong { font-size:11px; }
   .home-page--sheet .location-card small { max-width:66vw; overflow:hidden; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }

@@ -1,6 +1,7 @@
 import { formatCalculatedMinutes } from "../../utils/recommendationFormatting";
 import CourseTimeline from "./CourseTimeline";
 import CourseReplacementPicker from "./CourseReplacementPicker";
+import CourseQuestToggle from "./CourseQuestToggle";
 
 /** 계산된 코스의 요약, 퀘스트, 이동 구간, 교체 및 확정 동작을 표시한다. */
 export default function CalculatedCoursePanel({
@@ -14,6 +15,8 @@ export default function CalculatedCoursePanel({
   onFocusStop,
   adventureMode,
   questPlans,
+  questsEnabled,
+  onToggleQuests,
   onResetSelection,
   isAutoCourse,
   onReturnToAutoCourses,
@@ -47,7 +50,11 @@ export default function CalculatedCoursePanel({
         <button type="button" aria-expanded={sheetExpanded} onClick={onToggleRoute}>전체 코스 보기</button>
       </div>
 
-      {courseConfirmed && questPlans.length > 0 && (
+      {course?.status === "FEASIBLE" && (
+        <CourseQuestToggle enabled={questsEnabled} onChange={onToggleQuests} account={account} />
+      )}
+
+      {courseConfirmed && questsEnabled && questPlans.length > 0 && (
         <section className="course-quest-ready" aria-label="오늘의 선택 미션">
           <span aria-hidden="true">✦</span>
           <div><b>오늘의 선택 미션 {questPlans.length}개</b><small>장소에 도착하면 하나씩 제안해요. 원하지 않으면 건너뛰어도 괜찮아요.</small></div>

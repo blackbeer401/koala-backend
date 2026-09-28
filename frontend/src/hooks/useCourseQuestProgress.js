@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   createDailyCourseQuestPlan,
+  getCourseQuestSignature,
   getDailyQuestStorageKeys,
   readDailyQuestPlan,
   readQuestProgress,
@@ -13,6 +14,7 @@ export function useCourseQuestProgress({
   visiblePlaces,
   adventureExperience,
   courseConfirmed,
+  questsEnabled,
   mysteryRevealed,
   guideStep,
   userKey = "guest",
@@ -39,14 +41,14 @@ export function useCourseQuestProgress({
     key: storageKeys.progress,
     value: readQuestProgress(storageKeys.progress),
   }));
-  const questPlans = planState.key === storageKeys.plan ? planState.plans : [];
+  const questPlans = questsEnabled && planState.key === storageKeys.plan ? planState.plans : [];
   const questProgress = progressState.key === storageKeys.progress ? progressState.value : {};
   useEffect(() => {
     if (planState.key !== storageKeys.plan) {
       const savedPlan = readDailyQuestPlan(storageKeys.plan);
       if (savedPlan) {
         setPlanState({ key: storageKeys.plan, plans: savedPlan });
-      } else if (courseConfirmed && visiblePlaces.length) {
+      } else if (courseConfirmed && questsEnabled && visiblePlaces.length) {
         const plans = createDailyCourseQuestPlan(visiblePlaces, storageKeys.dayKey, userKey);
         writeDailyQuestPlan(storageKeys.plan, plans);
         setPlanState({
@@ -57,7 +59,7 @@ export function useCourseQuestProgress({
       return;
     }
 
-    if (!planState.plans.length && courseConfirmed && visiblePlaces.length) {
+    if (!planState.plans.length && courseConfirmed && questsEnabled && visiblePlaces.length) {
       const plans = createDailyCourseQuestPlan(visiblePlaces, storageKeys.dayKey, userKey);
       writeDailyQuestPlan(storageKeys.plan, plans);
       setPlanState({
@@ -65,7 +67,18 @@ export function useCourseQuestProgress({
         plans,
       });
     }
-  }, [planState, courseConfirmed, storageKeys, userKey, visiblePlaces]);
+
+    if (planState.plans.length && courseConfirmed && questsEnabled && visiblePlaces.length) {
+      const currentSignature = getCourseQuestSignature(visiblePlaces);
+      const planSignature = planState.plans[0]?.courseSignature;
+      const hasStartedQuest = planState.plans.some((quest) => questProgress[quest.id]);
+      if (planSignature !== currentSignature && !hasStartedQuest) {
+        const plans = createDailyCourseQuestPlan(visiblePlaces, storageKeys.dayKey, userKey);
+        writeDailyQuestPlan(storageKeys.plan, plans);
+        setPlanState({ key: storageKeys.plan, plans });
+      }
+    }
+  }, [planState, courseConfirmed, questsEnabled, questProgress, storageKeys, userKey, visiblePlaces]);
 
   useEffect(() => {
     if (progressState.key !== storageKeys.progress) {

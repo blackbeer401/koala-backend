@@ -76,12 +76,21 @@ export function getDailyQuestStorageKeys(userKey = "guest", dayKey = currentLoca
   };
 }
 
+/** Identify the confirmed route so an untouched daily plan can follow a changed course. */
+export function getCourseQuestSignature(places) {
+  const courseKey = (places ?? [])
+    .map((place) => `${place?.name ?? ""}:${place?.category ?? ""}:${place?.latitude ?? ""}:${place?.longitude ?? ""}`)
+    .join("|");
+  return stableHash(courseKey).toString(36);
+}
+
 /** Build one or two daily missions from the stops in the confirmed course. */
 export function createDailyCourseQuestPlan(places, dayKey, userKey = "guest") {
   if (!places?.length) return [];
 
   // Stable per user and day: it feels random, but refreshes never reshuffle it.
   const seed = stableHash(`${userKey}:${dayKey}`);
+  const courseSignature = getCourseQuestSignature(places);
   const mainIndex = seed % places.length;
   const mainPlace = places[mainIndex];
   const plan = [
@@ -107,6 +116,7 @@ export function createDailyCourseQuestPlan(places, dayKey, userKey = "guest") {
     placeIndex,
     placeName: place.name,
     category: place.category,
+    courseSignature,
     rewardXp,
   }));
 }

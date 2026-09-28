@@ -6,6 +6,7 @@ import { formatLegTransport } from "../../utils/courseNavigation";
 import { courseStopColors } from "../../config/recommendationDisplay";
 import { questForPlace } from "../../utils/questMissions";
 import { placeIdentity } from "../../utils/recommendationPlaces";
+import CourseQuestToggle from "./CourseQuestToggle";
 
 export default function CourseGuidancePanel({
   guideIsComplete,
@@ -36,6 +37,8 @@ export default function CourseGuidancePanel({
   arrivalQuestStatus,
   arrivalQuestReward,
   onQuestProgressChange,
+  questsEnabled,
+  onToggleQuests,
   hasEndDestination,
   setMysteryRevealed,
   resetCourseSelection,
@@ -204,6 +207,7 @@ export default function CourseGuidancePanel({
               </p>
             )}
           </section>
+          <CourseQuestToggle enabled={questsEnabled} onChange={onToggleQuests} account={account} />
           {mysteryMode && guidePreviousPlace && (
             <div className="mystery-arrival-card" role="status">
               <small>방금 도착한 장소</small>
@@ -220,6 +224,7 @@ export default function CourseGuidancePanel({
                 <b>{arrivalQuest.title}</b>
                 <p>{arrivalQuest.detail}</p>
                 <span>약 {arrivalQuest.minutes}분 · {arrivalQuest.slot === "main" ? "+10" : "+5"} XP</span>
+                <small className="course-quest-self-report">완료 여부는 직접 체크해 주세요.</small>
               </div>
               {arrivalQuestStatus === "done" ? (
                 <div className="course-arrival-quest-result" role="status">
@@ -240,7 +245,7 @@ export default function CourseGuidancePanel({
                 </div>
               ) : (
                 <div className="course-arrival-quest-actions">
-                  <button type="button" onClick={() => onQuestProgressChange(arrivalQuest.id, "done")}>해봤어요</button>
+                  <button type="button" onClick={() => onQuestProgressChange(arrivalQuest.id, "done")}>완료 체크</button>
                   <button type="button" onClick={() => onQuestProgressChange(arrivalQuest.id, "skipped")}>건너뛰기</button>
                 </div>
               )}

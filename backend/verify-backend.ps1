@@ -7,10 +7,12 @@ $backendDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $backendDir
 
 if (-not $PythonPath) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     $candidates = @(
-        (Join-Path $backendDir ".audit-venv\Scripts\python.exe"),
-        (Join-Path $projectDir ".audit-venv\Scripts\python.exe"),
-        "C:\Users\Admin\p2\backend\MBCA-P2-mvp2-integrated\.audit-venv\Scripts\python.exe"
+        (Join-Path $backendDir "core\.venv\Scripts\python.exe"),
+        (Join-Path $backendDir ".venv\Scripts\python.exe"),
+        (Join-Path $projectDir ".venv\Scripts\python.exe"),
+        $(if ($pythonCommand) { $pythonCommand.Source })
     )
     $PythonPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }

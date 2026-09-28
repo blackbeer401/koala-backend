@@ -14,9 +14,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontendRoot 'package.json'))) {
 # 저장소 가상환경을 우선 사용하고, 없으면 PATH의 Python을 찾습니다.
 $pythonExe = Join-Path $mvpRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $pythonExe)) {
-  $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-  if (-not $pythonCommand) { throw '저장소 가상환경이나 PATH에서 Python을 찾지 못했습니다.' }
-  $pythonExe = $pythonCommand.Source
+  $corePythonExe = Join-Path $backendRoot 'core\.venv\Scripts\python.exe'
+  if (Test-Path -LiteralPath $corePythonExe) {
+    $pythonExe = $corePythonExe
+  } else {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCommand) { throw '저장소 가상환경이나 PATH에서 Python을 찾지 못했습니다.' }
+    $pythonExe = $pythonCommand.Source
+  }
 }
 
 # 서버를 내리기 전에 DB 연결과 안전한 스키마 업데이트를 먼저 확인합니다.

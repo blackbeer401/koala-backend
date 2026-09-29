@@ -379,7 +379,7 @@ function HomePage({
       ...autoCourse,
       id: pendingAdventureMode ? `adventure-${pendingAdventureMode}` : "auto",
       prompt,
-      fast: !pendingAdventureMode,
+      fast: true,
       durationMinutes,
       adventureMode: pendingAdventureMode,
     });

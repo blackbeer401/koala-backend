@@ -26,9 +26,9 @@ const labels = {
 
 const modeCopy = {
   "blind-course": {
-    eyebrow: "블라인드 코스",
-    title: "어디로 갈지는 출발 직전에 알려드릴게요",
-    description: "이동 시간과 활동 종류만 먼저 확인하고, 마음에 들면 목적지를 공개하세요.",
+    eyebrow: "미스터리 가이드",
+    title: "목적지를 숨긴 코스를 준비하고 있어요",
+    description: "코스가 완성되면 바로 안내를 시작해요. 목적지는 도착하면 공개돼요.",
   },
   course: {
     eyebrow: "랜덤 코스",
@@ -269,7 +269,10 @@ export default function AdventurePanel({
             {loading && (
               <div className="adventure-result">추천을 고르는 중…</div>
             )}
-            {error && <div className="adventure-result is-error">{error}</div>}
+            {error && <div className="adventure-result is-error" role="alert">
+              {error}
+              {focusedMode && <button type="button" disabled={Boolean(loading)} onClick={() => run(focusedMode)}>다시 추천받기</button>}
+            </div>}
             {result?.blind && (
               <div className="adventure-result">
                 <b>{labels[result.data.category] ?? "랜덤"} 후보를 골랐어요</b>

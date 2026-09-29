@@ -64,13 +64,16 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
   );
   const restoredSavedCourse = response?._client_saved_course ?? null;
   const restoredCourse = restoredSavedCourse?.course_data ?? null;
+  const initialAdventureMode = ["blind-course", "course"].includes(response?._client_adventure_mode)
+    ? response._client_adventure_mode : null;
   const rankingAreas = useMemo(
     () => [
       ...(result.targetArea ? [result.targetArea] : []),
+      ...(!result.targetArea && initialAdventureMode && result.currentArea ? [result.currentArea] : []),
       ...result.otherAreas,
       ...result.extendedAreas,
     ],
-    [result],
+    [result, initialAdventureMode],
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [pinnedCourseArea, setPinnedCourseArea] = useState(null);
@@ -187,10 +190,30 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
   );
 
   const useAdventurePlaces = async (adventurePlaces, options = {}) => {
-    setPinnedCourseArea(null);
     const normalized = adventurePlaces.map((place, index) =>
       normalizePlace(place, `adventure-${index}`),
     );
+    if (!normalized.length) throw new Error("추천 장소가 없어요. 다시 추천받아 주세요.");
+    // 코스 검증이 끝날 때까지 추천 창을 유지해 실패 시 자동 재실행을 막는다.
+    const requestId = ++calculationRequest.current;
+    let course = null;
+    if (options.autoConfirm) {
+      course = await requestCourse({
+        startLocation,
+        selectedPlaces: normalized,
+        availableTimeMinutes,
+        departureDatetime: result.recommendationContext?.departure_datetime,
+        endLocation: result.mapContext?.end ?? result.recommendationContext?.end_location,
+        transportMode,
+        optimizeOrder: false,
+        fresh: true,
+      });
+      if (requestId !== calculationRequest.current) return;
+      if (course.status !== "FEASIBLE") {
+        throw new Error("실제 이동시간을 포함하면 시간이 부족해요. 다시 추천받거나 여유 시간을 늘려 주세요.");
+      }
+    }
+    setPinnedCourseArea(null);
     setPlaces((current) => [
       ...normalized,
       ...current.filter(
@@ -217,29 +240,9 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
       quest: options.quest ?? null,
     });
     setSheetExpanded(true);
-    if (!options.autoConfirm || !normalized.length) return;
-    const requestId = ++calculationRequest.current;
-    setCalculationStatus("loading");
     setCalculationError("");
-    try {
-      const course = await requestCourse({
-        startLocation,
-        selectedPlaces: normalized,
-        availableTimeMinutes,
-        departureDatetime: result.recommendationContext?.departure_datetime,
-        endLocation:
-          result.mapContext?.end ?? result.recommendationContext?.end_location,
-        transportMode,
-        optimizeOrder: false,
-        fresh: true,
-      });
-      if (requestId !== calculationRequest.current) return;
-      if (course.status !== "FEASIBLE") {
-        setCalculationStatus("warning");
-        setCalculationError("실제 이동시간을 포함하면 시간이 부족해요. 자동으로 다른 코스를 찾는 중이에요.");
-        setPlaceMode(false);
-        return;
-      }
+    setCalculationStatus("idle");
+    if (course) {
       setCourseResult({ validation: null, course });
       setCourseHistory((current) => [
         {
@@ -256,11 +259,6 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
       setGuidanceStarted(Boolean(options.startGuidance));
       setSheetExpanded(Boolean(options.startGuidance));
       setCalculationStatus("ready");
-    } catch (error) {
-      if (requestId !== calculationRequest.current) return;
-      setCalculationStatus("error");
-      setCalculationError(error.message ?? "코스를 완성하지 못했어요.");
-      setPlaceMode(false);
     }
   };
   const useAdventureArea = (adventureArea) => {
@@ -1330,9 +1328,9 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                   targetArea={result.targetArea}
                   selectedArea={selectedArea}
                   areas={rankingAreas}
-                  recommendationContext={result.recommendationContext}
+                  recommendationContext={{ ...result.recommendationContext, transport_mode: transportMode, available_time_minutes: availableTimeMinutes }}
                   origin={result.origin}
-                  initialAdventureMode={["blind-course", "course"].includes(response?._client_adventure_mode) ? response._client_adventure_mode : null}
+                  initialAdventureMode={initialAdventureMode}
                   selectedIndex={selectedIndex}
                   displayArea={displayArea}
                   onPreviewArea={prepareAreaRoute}

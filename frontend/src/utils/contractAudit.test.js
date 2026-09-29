@@ -10,6 +10,15 @@ test('backend context supplies start and final destination without map_context',
   assert.deepEqual(result.mapContext.end, context.end_location)
   assert.equal(result.mapContext.available_time_minutes, 120)
 })
+test('client-selected origin is preserved for an unambiguous results label', () => {
+  const context = { start_location: { latitude: 37.49, longitude: 126.89 }, available_time_minutes: 120 }
+  const result = normalizeRecommendation({
+    recommendation_context: context,
+    _client_origin: { label: '서울대입구역 2호선', source: 'manual' },
+  })
+  assert.equal(result.origin.label, '서울대입구역 2호선')
+  assert.equal(result.currentArea, null)
+})
 test('car does not appear as transit', () => {
   assert.equal(normalizeCandidate({ start_to_candidate_transport: { mode: 'car' } }, 1).fromStartTransport, '자동차')
 })

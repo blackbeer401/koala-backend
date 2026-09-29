@@ -1,5 +1,5 @@
 from typing import Annotated, Any, Literal
-from datetime import datetime
+from datetime import date, datetime
 import string
 
 from pydantic import (
@@ -42,6 +42,30 @@ class RecommendRequest(BaseModel):
         default=None,
         ge=-180,
         le=180
+    )
+
+    # 확장 추천 서비스와 프런트엔드가 함께 사용하는 선택 조건.
+    # 기본값을 두어 기존의 자연어 요청만 보내는 클라이언트도 호환한다.
+    preferred_transport_mode: Literal[
+        "auto", "public_transit", "walk", "car"
+    ] | None = None
+    preferred_space: Literal["indoor", "outdoor", "any"] | None = None
+    preferred_activities: list[
+        Literal[
+            "food",
+            "cafe",
+            "walk",
+            "culture",
+            "entertainment",
+            "shopping",
+            "drink",
+        ]
+    ] = Field(default_factory=list)
+    auto_course: bool = False
+    auto_course_duration_minutes: int | None = Field(
+        default=None,
+        ge=30,
+        le=480,
     )
 
     # 위도와 경도 중 하나만 들어오는 것을 방지
@@ -357,6 +381,7 @@ class CourseCalculationRequest(BaseModel):
         max_length=6,
     )
     available_time_minutes: int = Field(gt=0)
+    optimize_order: bool = True
     departure_datetime: datetime | None = None
     end_location: CourseLocationRequest | None = None
     transport_mode: Literal[
@@ -478,6 +503,9 @@ class PlaceRecommendRequest(BaseModel):
         ActivityCode,
         PreferenceLevel,
     ] = Field(default_factory=dict)
+
+    # 일정에서 전달된 날짜가 있으면 해당 날짜의 팝업 데이터를 우선한다.
+    reference_date: date | None = None
 
 
 # 모험/랜덤 추천 기능에서 사용하는 요청·응답 모델

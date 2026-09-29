@@ -209,6 +209,7 @@ function escapeHtml(value) {
 
 function KakaoCourseMap({
   mapContext,
+  startLocationLabel = "현재 위치",
   selectedArea,
   areaRoute,
   walkingRouteLoading = false,
@@ -333,7 +334,7 @@ function KakaoCourseMap({
     if (!isCourseReview) {
       extendBounds(start);
       const startLabel = escapeHtml(
-        guidanceActive ? guidanceStartLabel : "현재 위치",
+        guidanceActive ? guidanceStartLabel : startLocationLabel,
       );
       const headingMarkup =
         guidanceActive && Number.isFinite(deviceHeading)
@@ -607,6 +608,7 @@ function KakaoCourseMap({
   }, [
     mapReady,
     mapContext,
+    startLocationLabel,
     selectedArea,
     areaRoute,
     selectedPlaces,

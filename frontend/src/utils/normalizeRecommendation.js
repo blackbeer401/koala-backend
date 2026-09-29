@@ -84,6 +84,7 @@ export function normalizeRecommendation(response) {
       available_time_minutes: response.recommendation_context.available_time_minutes,
     } : response.map_context ?? null,
     recommendationContext: response.recommendation_context ?? null,
+    origin: response._client_origin ?? null,
     proactiveSuggestion: response.proactive_suggestion ?? null,
     targetArea: normalizeCandidate(response.target_area, 1),
     currentArea: normalizeCandidate(response.current_area, null),

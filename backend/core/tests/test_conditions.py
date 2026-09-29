@@ -133,5 +133,34 @@ class ExplicitLocationPriorityTests(unittest.TestCase):
         )
 
 
+class RecommendRequestCompatibilityTests(unittest.TestCase):
+    def test_extension_preferences_have_backward_compatible_defaults(self):
+        request = RecommendRequest(user_message="근처에서 시간 보내고 싶어")
+
+        self.assertFalse(request.auto_course)
+        self.assertIsNone(request.auto_course_duration_minutes)
+        self.assertIsNone(request.preferred_transport_mode)
+        self.assertIsNone(request.preferred_space)
+        self.assertEqual(request.preferred_activities, [])
+
+    def test_frontend_recommendation_payload_is_accepted(self):
+        request = RecommendRequest(
+            user_message="세 시간 동안 카페와 전시를 보고 싶어",
+            gps_latitude=37.5665,
+            gps_longitude=126.9780,
+            preferred_transport_mode="public_transit",
+            preferred_space="indoor",
+            preferred_activities=["cafe", "culture"],
+            auto_course=True,
+            auto_course_duration_minutes=180,
+        )
+
+        self.assertTrue(request.auto_course)
+        self.assertEqual(request.auto_course_duration_minutes, 180)
+        self.assertEqual(request.preferred_transport_mode, "public_transit")
+        self.assertEqual(request.preferred_space, "indoor")
+        self.assertEqual(request.preferred_activities, ["cafe", "culture"])
+
+
 if __name__ == "__main__":
     unittest.main()

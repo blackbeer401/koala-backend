@@ -18,3 +18,10 @@ export function hasAutoCourseStartLocationMismatch(requestLocation, responseStar
   const distance = distanceMetersBetweenLocations(requestLocation, responseStartLocation)
   return distance !== null && distance > maximumMeters
 }
+
+// A user-selected manual origin is explicit input, so the backend must not
+// silently substitute another point. Allow minor geocoder coordinate drift.
+export function hasStartLocationMismatch(requestLocation, responseStartLocation, maximumMeters = 500) {
+  const distance = distanceMetersBetweenLocations(requestLocation, responseStartLocation)
+  return distance === null || distance > maximumMeters
+}

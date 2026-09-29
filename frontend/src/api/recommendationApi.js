@@ -1,6 +1,9 @@
 import { measureAsync } from "../utils/performanceMetric";
 import { startTrace, getTrace, audit } from "../utils/auditTrace";
-import { hasAutoCourseStartLocationMismatch } from "../utils/locationContract";
+import {
+  hasAutoCourseStartLocationMismatch,
+  hasStartLocationMismatch,
+} from "../utils/locationContract";
 import { API_BASE_URL } from "./apiConfig";
 
 export async function requestRecommendation(
@@ -18,8 +21,26 @@ export async function requestRecommendation(
   audit("input", {
     user_input: message,
     gps_provided: Boolean(location),
+    location_source: location?.source ?? (location ? "gps" : "missing"),
+    location_approximate: location
+      ? {
+          latitude: Number(Number(location.latitude).toFixed(3)),
+          longitude: Number(Number(location.longitude).toFixed(3)),
+        }
+      : null,
     fastAutoCourse,
   });
+  const clientOrigin = location
+    ? {
+        name: location.name ?? null,
+        address: location.address ?? null,
+        source: location.source ?? "gps",
+        label:
+          location.source === "manual"
+            ? location.name ?? "직접 선택한 위치"
+            : "GPS 현재 위치",
+      }
+    : null;
   return measureAsync("recommend-request", async () => {
     const timeoutController = new AbortController();
     // LLM과 지도 조회가 함께 실행되는 정상 요청도 15초를 넘길 수 있다.
@@ -94,6 +115,21 @@ export async function requestRecommendation(
         "현재 위치와 다른 지역으로 추천하려고 했어요. 서버를 재시작한 뒤 다시 추천받아 주세요.",
       );
     }
+    if (location?.source === "manual") {
+      const responseStart = data.recommendation_context?.start_location;
+      if (
+        !responseStart ||
+        hasStartLocationMismatch(location, responseStart)
+      ) {
+        audit("contract_warning", {
+          warning: "manual_start_location_mismatch",
+          response_start_available: Boolean(responseStart),
+        });
+        throw new Error(
+          "선택한 출발지와 다른 위치로 추천하려고 했어요. 출발지를 다시 확인한 뒤 시도해 주세요.",
+        );
+      }
+    }
     if (fastAutoCourse && Number.isInteger(Number(autoCourseDurationMinutes))) {
       const selectedMinutes = Number(autoCourseDurationMinutes);
       const backendMinutes = Number(
@@ -123,6 +159,7 @@ export async function requestRecommendation(
         });
         return {
           ...data,
+          _client_origin: clientOrigin,
           recommendation_context: {
             ...(data.recommendation_context ?? {}),
             available_time_minutes: selectedMinutes,
@@ -130,6 +167,9 @@ export async function requestRecommendation(
         };
       }
     }
-    return data;
+    return {
+      ...data,
+      _client_origin: clientOrigin,
+    };
   });
 }

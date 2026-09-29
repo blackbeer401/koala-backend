@@ -940,6 +940,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
     >
       <KakaoCourseMap
         mapContext={result.mapContext}
+        startLocationLabel={result.origin?.label ?? "현재 위치"}
         selectedArea={selectedArea}
         areaRoute={selectedAreaRoute}
         walkingRouteLoading={isWalkingRouteLoading}
@@ -1330,6 +1331,7 @@ function RecommendationPage({ response, onBack, account, onOpenAccount, onAccoun
                   selectedArea={selectedArea}
                   areas={rankingAreas}
                   recommendationContext={result.recommendationContext}
+                  origin={result.origin}
                   initialAdventureMode={["blind-course", "course"].includes(response?._client_adventure_mode) ? response._client_adventure_mode : null}
                   selectedIndex={selectedIndex}
                   displayArea={displayArea}

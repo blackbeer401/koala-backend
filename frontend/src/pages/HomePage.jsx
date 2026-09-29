@@ -103,7 +103,13 @@ function HomePage({
     requestLocation,
     clearLocation,
   } = useCurrentLocation();
-  const activeLocation = manualLocation ?? location;
+  const activeLocation = manualLocation ?? (location
+    ? {
+        ...location,
+        name: address?.display_name ?? null,
+        source: "gps",
+      }
+    : null);
   const activeLocationName = manualLocation?.name ?? "현재 위치";
   const canChooseManualStart =
     manualLocation || ["denied", "unavailable", "unsupported", "loading", "low_accuracy"].includes(status);
@@ -119,13 +125,14 @@ function HomePage({
       // 직접 출발지를 고르면 진행 중 GPS watcher를 중단해 늦게 도착한 좌표가
       // 사용자의 선택을 덮어쓰거나 자동 추천이 두 번 실행되지 않게 한다.
       clearLocation();
-      setManualLocation(result);
+      const selectedLocation = { ...result, source: "manual" };
+      setManualLocation(selectedLocation);
       setStartLocationQuery(result.name);
       setLocationSearchError("");
       setQuickCourseError("");
       if (pendingQuickCourse) {
         const prompt = pendingQuickCourse.prompt.replace(/^현재 위치에서/, `${result.name}에서`);
-        void submitQuickCourse({ ...pendingQuickCourse, prompt }, result);
+        void submitQuickCourse({ ...pendingQuickCourse, prompt }, selectedLocation);
       }
     } catch (searchError) {
       setLocationSearchError(searchError.message);

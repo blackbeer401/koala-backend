@@ -7,6 +7,7 @@ export default function RegionRecommendationList({
   selectedArea,
   areas,
   recommendationContext,
+  origin,
   initialAdventureMode,
   selectedIndex,
   displayArea,
@@ -21,6 +22,11 @@ export default function RegionRecommendationList({
         <div>
           <h2>{targetArea ? "요청한 지역 코스" : "지금 가기 좋은 지역"}</h2>
           <p>지역을 누르면 실제 장소를 선택할 수 있어요</p>
+          {origin?.label && (
+            <p className="recommendation-origin" aria-label="추천 계산 출발지">
+              출발 기준: {origin.label}
+            </p>
+          )}
         </div>
         <AdventurePanel
           area={selectedArea}

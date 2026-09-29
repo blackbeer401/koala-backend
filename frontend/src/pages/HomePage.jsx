@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentLocation } from "../hooks/useCurrentLocation";
-import { FAST_GPS_ACCURACY_METERS } from "../utils/locationAccuracy";
 import { searchStartLocation } from "../api/locationApi";
 import koalaPeeking from "../assets/images/koala-peeking.webp";
 import TimeWheel from "../components/common/TimeWheel";
@@ -111,8 +110,6 @@ function HomePage({
       }
     : null);
   const activeLocationName = manualLocation?.name ?? "현재 위치";
-  const canChooseManualStart =
-    manualLocation || ["denied", "unavailable", "unsupported", "loading", "low_accuracy"].includes(status);
 
   const handleSearchStartLocation = async (event) => {
     event.preventDefault();
@@ -471,14 +468,14 @@ function HomePage({
       : status === "loading"
         ? "현재 위치를 확인하는 중이에요"
         : status === "low_accuracy"
-          ? "GPS 정확도가 낮아 더 정확한 위치를 찾는 중이에요"
+          ? "GPS 위치가 정확하지 않아 다시 확인하고 있어요"
         : status === "denied"
           ? "지역을 입력하거나 위치 권한을 허용해 주세요"
           : status === "unavailable"
             ? "위치를 확인하지 못했어요. 다시 눌러주세요"
             : status === "unsupported"
               ? "이 기기에서는 위치를 지원하지 않아요"
-              : "현재 위치를 알려주시면 더 정확해요";
+              : "출발 위치를 먼저 정해 주세요";
   const selectedDurationMinutes = courseHours * 60 + courseMinutes;
 
   return (
@@ -545,9 +542,12 @@ function HomePage({
                       : "도로명 주소를 확인하고 있어요")
                   : status === "denied" || status === "unavailable" || status === "unsupported"
                     ? "아래에서 역이나 동네를 검색해 출발지를 정할 수 있어요"
-                    : "눌러서 현재 위치 확인하기"}
-              {!manualLocation && status === "success" &&
-                location?.accuracy > FAST_GPS_ACCURACY_METERS &&
+                    : status === "loading" || status === "low_accuracy"
+                      ? "GPS를 확인 중이에요 · 아래에서 출발지를 직접 선택할 수 있어요"
+                      : status === "idle"
+                        ? "아래에서 출발지를 검색하거나 현재 위치를 눌러 확인하세요"
+                        : "아래에서 다른 역이나 동네로 바꿀 수 있어요"}
+              {!manualLocation && location?.accuracy &&
                 ` · GPS 오차 범위 약 ${Math.round(location.accuracy)}m`}
             </small>
           </span>
@@ -570,7 +570,6 @@ function HomePage({
                   : "›"}
           </span>
         </button>
-        {canChooseManualStart && (
         <form className="start-location-search" onSubmit={handleSearchStartLocation}>
         <label className="sr-only" htmlFor="start-location-query">출발 지역 직접 입력</label>
         <input
@@ -581,7 +580,7 @@ function HomePage({
             if (manualLocation) setManualLocation(null);
             setLocationSearchError("");
           }}
-          placeholder="GPS가 안 잡히면 역·동네 이름 입력"
+          placeholder="출발 지역을 입력해 주세요 (예: 홍대입구역)"
           autoComplete="off"
         />
         <button type="submit" disabled={searchingLocation || startLocationQuery.trim().length < 2}>
@@ -594,7 +593,6 @@ function HomePage({
           </button>
         )}
         </form>
-        )}
       </section>
       <form className="recommendation-form" onSubmit={handleSubmit}>
         <div className="recommendation-label-row">

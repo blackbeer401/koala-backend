@@ -124,7 +124,9 @@ export function useCurrentLocation() {
           }
           setStatus('low_accuracy')
         },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+        // Immediately reuse a recent fix when available, while still asking
+        // the browser for a fresh high accuracy location.
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 },
       )
     } catch (error) {
       // Some browsers throw synchronously when location access is blocked by

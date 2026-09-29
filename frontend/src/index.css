@@ -198,7 +198,7 @@ button, textarea, input { font: inherit; }
   .home-page--sheet .account-button { align-self:center; align-content:center; align-items:center; justify-content:center; min-height:42px; padding:0 11px; }
   .home-page--sheet .location-card { min-height:50px; margin-top:14px; padding:8px 10px; border-radius:14px; }
   .home-page--sheet .location-card strong { font-size:11px; }
-  .home-page--sheet .location-card small { max-width:66vw; overflow:hidden; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+  .home-page--sheet .location-card small { max-width:66vw; overflow:visible; font-size:9px; line-height:1.4; white-space:normal; }
   .home-page--sheet .recommendation-form { display:flex; flex:1; flex-direction:column; gap:10px; margin-top:16px; overflow:visible; }
   .home-page--sheet .recommendation-form > label { margin:0; font-size:14px; }
   .home-page--sheet .recommendation-hint,

@@ -11,12 +11,14 @@ const GPS_FIX_WAIT_MS = 8000
 
 export function useCurrentLocation() {
   const [location, setLocation] = useState(null)
+  const [displayLocation, setDisplayLocation] = useState(null)
   const [address, setAddress] = useState(null)
   const [addressStatus, setAddressStatus] = useState('idle')
   const [status, setStatus] = useState('idle')
   const watchIdRef = useRef(null)
   const fixTimeoutRef = useRef(null)
   const addressRequestRef = useRef(null)
+  const addressLocationRef = useRef(null)
   const generationRef = useRef(0)
 
   const stopWatching = useCallback(() => {
@@ -35,6 +37,7 @@ export function useCurrentLocation() {
     }
     addressRequestRef.current?.abort()
     addressRequestRef.current = null
+    addressLocationRef.current = null
   }, [stopWatching])
 
   useEffect(() => cancelRequests, [cancelRequests])
@@ -42,6 +45,7 @@ export function useCurrentLocation() {
   const clearLocation = useCallback(() => {
     cancelRequests()
     setLocation(null)
+    setDisplayLocation(null)
     setAddress(null)
     setAddressStatus('idle')
     setStatus('idle')
@@ -57,8 +61,30 @@ export function useCurrentLocation() {
     cancelRequests()
     const generation = generationRef.current
     setStatus('loading')
+    setAddress(null)
+    setAddressStatus('loading')
     let settled = false
     let bestLocation = null
+
+    const lookupAddress = (nextLocation) => {
+      if (addressLocationRef.current === nextLocation) return
+      addressRequestRef.current?.abort()
+      const addressController = new AbortController()
+      addressRequestRef.current = addressController
+      addressLocationRef.current = nextLocation
+      setAddressStatus('loading')
+      const addressTimeout = window.setTimeout(() => addressController.abort(), 8000)
+      reverseGeocodeLocation(nextLocation, { signal: addressController.signal })
+        .then((result) => {
+          if (generation !== generationRef.current || bestLocation !== nextLocation) return
+          setAddress(result)
+          setAddressStatus(result?.road_address || result?.jibun_address || result?.display_name ? 'success' : 'unavailable')
+        })
+        .catch(() => {
+          if (generation === generationRef.current && bestLocation === nextLocation) setAddressStatus('unavailable')
+        })
+        .finally(() => window.clearTimeout(addressTimeout))
+    }
 
     const fail = (error) => {
       if (settled || generation !== generationRef.current) return
@@ -81,24 +107,14 @@ export function useCurrentLocation() {
         fixTimeoutRef.current = null
       }
       setLocation(nextLocation)
-      setAddress(null)
-      setAddressStatus('loading')
+      setDisplayLocation(nextLocation)
       setStatus('success')
       stopWatching()
       if (typeof onSuccess === 'function') onSuccess(nextLocation)
 
-      // Ignore late address responses after location is cleared or requested again.
-      const addressController = new AbortController()
-      addressRequestRef.current = addressController
-      const addressTimeout = window.setTimeout(() => addressController.abort(), 8000)
-      reverseGeocodeLocation(nextLocation, { signal: addressController.signal })
-        .then((result) => {
-          if (generation !== generationRef.current) return
-          setAddress(result)
-          setAddressStatus(result?.road_address || result?.jibun_address || result?.display_name ? 'success' : 'unavailable')
-        })
-        .catch(() => { if (generation === generationRef.current) setAddressStatus('unavailable') })
-        .finally(() => window.clearTimeout(addressTimeout))
+      // Resolve the first usable location immediately; keep refreshing the
+      // address if the browser supplies a better fix while the watch is active.
+      lookupAddress(nextLocation)
     }
 
     try {
@@ -109,6 +125,8 @@ export function useCurrentLocation() {
           if (!nextLocation) return
           if (!bestLocation || nextLocation.accuracy < bestLocation.accuracy) {
             bestLocation = nextLocation
+            setDisplayLocation(nextLocation)
+            lookupAddress(nextLocation)
           }
           if (hasFastGpsFix(nextLocation)) {
             acceptLocation(nextLocation)
@@ -144,5 +162,5 @@ export function useCurrentLocation() {
     }, GPS_FIX_WAIT_MS)
   }, [stopWatching, cancelRequests])
 
-  return { location, address, addressStatus, status, requestLocation, clearLocation }
+  return { location, displayLocation, address, addressStatus, status, requestLocation, clearLocation }
 }

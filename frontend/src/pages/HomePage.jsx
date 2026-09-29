@@ -96,6 +96,7 @@ function HomePage({
   };
   const {
     location,
+    displayLocation,
     address,
     addressStatus,
     status,
@@ -468,7 +469,7 @@ function HomePage({
       : status === "loading"
         ? "현재 위치를 확인하는 중이에요"
         : status === "low_accuracy"
-          ? "GPS 위치가 정확하지 않아 다시 확인하고 있어요"
+          ? "현재 위치를 확인하는 중이에요"
         : status === "denied"
           ? "지역을 입력하거나 위치 권한을 허용해 주세요"
           : status === "unavailable"
@@ -542,13 +543,13 @@ function HomePage({
                       : "도로명 주소를 확인하고 있어요")
                   : status === "denied" || status === "unavailable" || status === "unsupported"
                     ? "아래에서 역이나 동네를 검색해 출발지를 정할 수 있어요"
-                    : status === "loading" || status === "low_accuracy"
-                      ? "GPS를 확인 중이에요 · 아래에서 출발지를 직접 선택할 수 있어요"
+                  : status === "loading" || status === "low_accuracy"
+                    ? displayLocation && addressStatus === "success"
+                      ? `${address?.road_address || address?.jibun_address || address?.display_name} · 현재 위치를 업데이트하고 있어요`
+                      : "현재 위치를 불러오고 있어요"
                       : status === "idle"
                         ? "아래에서 출발지를 검색하거나 현재 위치를 눌러 확인하세요"
                         : "아래에서 다른 역이나 동네로 바꿀 수 있어요"}
-              {!manualLocation && location?.accuracy &&
-                ` · GPS 오차 범위 약 ${Math.round(location.accuracy)}m`}
             </small>
           </span>
           <span

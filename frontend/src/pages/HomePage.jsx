@@ -111,6 +111,13 @@ function HomePage({
       }
     : null);
   const activeLocationName = manualLocation?.name ?? "현재 위치";
+  const canChooseManualStart = !manualLocation && [
+    "idle",
+    "denied",
+    "unavailable",
+    "unsupported",
+    "low_accuracy",
+  ].includes(status);
 
   const handleSearchStartLocation = async (event) => {
     event.preventDefault();
@@ -464,7 +471,7 @@ function HomePage({
 
   const locationText = manualLocation
     ? "직접 선택한 출발지를 사용 중이에요"
-    : status === "success"
+    : status === "success" || displayLocation
       ? "현재 위치를 사용하고 있어요"
       : status === "loading"
         ? "현재 위치를 확인하는 중이에요"
@@ -534,7 +541,7 @@ function HomePage({
             <small>
               {manualLocation
                 ? [manualLocation.name, manualLocation.address].filter(Boolean).join(" · ")
-                : status === "success"
+                  : status === "success"
                   ? address?.road_address ||
                     address?.jibun_address ||
                     address?.display_name ||
@@ -545,8 +552,10 @@ function HomePage({
                     ? "아래에서 역이나 동네를 검색해 출발지를 정할 수 있어요"
                   : status === "loading" || status === "low_accuracy"
                     ? displayLocation && addressStatus === "success"
-                      ? `${address?.road_address || address?.jibun_address || address?.display_name} · 현재 위치를 업데이트하고 있어요`
-                      : "현재 위치를 불러오고 있어요"
+                      ? address?.road_address || address?.jibun_address || address?.display_name
+                      : displayLocation
+                        ? "현재 위치를 사용하고 있어요"
+                        : "현재 위치를 불러오고 있어요"
                       : status === "idle"
                         ? "아래에서 출발지를 검색하거나 현재 위치를 눌러 확인하세요"
                         : "아래에서 다른 역이나 동네로 바꿀 수 있어요"}
@@ -571,7 +580,7 @@ function HomePage({
                   : "›"}
           </span>
         </button>
-        <form className="start-location-search" onSubmit={handleSearchStartLocation}>
+        {canChooseManualStart && <form className="start-location-search" onSubmit={handleSearchStartLocation}>
         <label className="sr-only" htmlFor="start-location-query">출발 지역 직접 입력</label>
         <input
           id="start-location-query"
@@ -593,7 +602,7 @@ function HomePage({
             현재 위치 다시 찾기
           </button>
         )}
-        </form>
+        </form>}
       </section>
       <form className="recommendation-form" onSubmit={handleSubmit}>
         <div className="recommendation-label-row">

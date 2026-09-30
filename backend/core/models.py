@@ -909,6 +909,8 @@ class ExploredRegionSummary(BaseModel):
     course_count: int
     last_used_at: datetime
     place_names: list[str] = Field(default_factory=list)
+    visited: bool = False
+    visited_course_count: int = 0
 
 
 class GamificationEventCreate(BaseModel):

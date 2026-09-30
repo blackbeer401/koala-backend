@@ -58,6 +58,14 @@ SEOUL_TIMEZONE = timezone(timedelta(hours=9), "KST")
 
 
 def _explored_region_summaries(db: Session, user_id: int) -> list[dict]:
+    completed_course_ids = {
+        context.get("course_id")
+        for context in db.scalars(select(GamificationEvent.context_data).where(
+            GamificationEvent.user_id == user_id,
+            GamificationEvent.event_type == "course_complete",
+        ))
+        if isinstance(context, dict) and context.get("course_id")
+    }
     records = list(
         db.scalars(
             select(UserExploredRegion)
@@ -73,11 +81,14 @@ def _explored_region_summaries(db: Session, user_id: int) -> list[dict]:
                 "district_code": record.district_code,
                 "district_name": record.district_name,
                 "course_ids": set(),
+                "visited_course_ids": set(),
                 "last_used_at": record.created_at,
                 "place_names": [],
             },
         )
         summary["course_ids"].add(record.course_id)
+        if record.course_id in completed_course_ids:
+            summary["visited_course_ids"].add(record.course_id)
         for name in record.place_names or []:
             if name not in summary["place_names"]:
                 summary["place_names"].append(name)
@@ -86,6 +97,8 @@ def _explored_region_summaries(db: Session, user_id: int) -> list[dict]:
             "district_code": item["district_code"],
             "district_name": item["district_name"],
             "course_count": len(item["course_ids"]),
+            "visited": bool(item["visited_course_ids"]),
+            "visited_course_count": len(item["visited_course_ids"]),
             "last_used_at": item["last_used_at"],
             "place_names": item["place_names"][:12],
         }
@@ -141,7 +154,18 @@ def _get_or_create_gamification_profile(db: Session, user_id: int, *, lock: bool
 
 def _gamification_snapshot(db: Session, user_id: int, profile=None) -> dict:
     profile = profile or _get_or_create_gamification_profile(db, user_id)
-    regions = list(db.scalars(select(UserExploredRegion.district_code).where(UserExploredRegion.user_id == user_id).distinct()))
+    completed_course_ids = {
+        context.get("course_id")
+        for context in db.scalars(select(GamificationEvent.context_data).where(
+            GamificationEvent.user_id == user_id,
+            GamificationEvent.event_type == "course_complete",
+        ))
+        if isinstance(context, dict) and context.get("course_id")
+    }
+    regions = list(db.scalars(select(UserExploredRegion.district_code).where(
+        UserExploredRegion.user_id == user_id,
+        UserExploredRegion.course_id.in_(completed_course_ids),
+    ).distinct())) if completed_course_ids else []
     region_count = len(regions)
     course_count = db.scalar(select(func.count()).select_from(GamificationEvent).where(
         GamificationEvent.user_id == user_id,
@@ -332,10 +356,6 @@ def record_gamification_event(
             ))
             if same_course:
                 continue
-            previously_explored = db.scalar(select(UserExploredRegion.id).where(
-                UserExploredRegion.user_id == user.id,
-                UserExploredRegion.district_code == district.district_code,
-            ))
             db.add(UserExploredRegion(
                 user_id=user.id,
                 course_id=request.course_id,
@@ -343,11 +363,6 @@ def record_gamification_event(
                 district_name=SEOUL_DISTRICT_NAMES[district.district_code],
                 place_names=list(dict.fromkeys(district.place_names)),
             ))
-            if not previously_explored:
-                region_event_key = f"district:{district.district_code}"
-                _award_event(db, user.id, region_event_key, "district_unlock", 20, {"district_code": district.district_code})
-                xp_awarded += 20
-                newly_unlocked.append({"district_code": district.district_code, "district_name": SEOUL_DISTRICT_NAMES[district.district_code]})
     elif request.event_type == "course_complete":
         daily_complete_count = db.scalar(select(func.count()).select_from(GamificationEvent).where(
             GamificationEvent.user_id == user.id,
@@ -356,6 +371,33 @@ def record_gamification_event(
         )) or 0
         xp_awarded = 15 if daily_complete_count < 3 else 0
         _award_event(db, user.id, event_key, "course_complete", xp_awarded, {"course_id": request.course_id})
+        completed_contexts = db.scalars(select(GamificationEvent.context_data).where(
+            GamificationEvent.user_id == user.id,
+            GamificationEvent.event_type == "course_complete",
+            GamificationEvent.event_key != event_key,
+        ))
+        previous_course_ids = {
+            context.get("course_id") for context in completed_contexts
+            if isinstance(context, dict) and context.get("course_id")
+        }
+        previously_visited_codes = set(db.scalars(select(UserExploredRegion.district_code).where(
+            UserExploredRegion.user_id == user.id,
+            UserExploredRegion.course_id.in_(previous_course_ids),
+        ).distinct())) if previous_course_ids else set()
+        current_codes = set(db.scalars(select(UserExploredRegion.district_code).where(
+            UserExploredRegion.user_id == user.id,
+            UserExploredRegion.course_id == request.course_id,
+        ).distinct()))
+        for code in current_codes - previously_visited_codes:
+            region_event_key = f"district:{code}"
+            prior_bonus = db.scalar(select(GamificationEvent.id).where(
+                GamificationEvent.user_id == user.id,
+                GamificationEvent.event_key == region_event_key,
+            ))
+            if not prior_bonus:
+                _award_event(db, user.id, region_event_key, "district_unlock", 20, {"district_code": code})
+                xp_awarded += 20
+            newly_unlocked.append({"district_code": code, "district_name": SEOUL_DISTRICT_NAMES[code]})
     else:
         # 퀘스트 키의 날짜는 위에서 한국 날짜로 검증했다. DB 서버 시간대에
         # 기대지 않고 그 날짜에 실제 지급된 미션 보상만 세어 일일 제한을 맞춘다.

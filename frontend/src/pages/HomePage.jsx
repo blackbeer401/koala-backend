@@ -67,6 +67,8 @@ function HomePage({
   const [locationSearchError, setLocationSearchError] = useState("");
   const [searchingLocation, setSearchingLocation] = useState(false);
   const [pendingAdventureMode, setPendingAdventureMode] = useState(null);
+  const [showAdventureOptions, setShowAdventureOptions] = useState(false);
+  const [showLocationOptions, setShowLocationOptions] = useState(false);
   const [appointmentPromptOpen, setAppointmentPromptOpen] = useState(false);
   const [pendingAppointmentMessage, setPendingAppointmentMessage] = useState("");
   const quickCourseRequestRef = useRef(false);
@@ -111,13 +113,13 @@ function HomePage({
       }
     : null);
   const activeLocationName = manualLocation?.name ?? "현재 위치";
-  const canChooseManualStart = !manualLocation && [
+  const canChooseManualStart = showLocationOptions || (!manualLocation && [
     "idle",
     "denied",
     "unavailable",
     "unsupported",
     "low_accuracy",
-  ].includes(status);
+  ].includes(status));
 
   const handleSearchStartLocation = async (event) => {
     event.preventDefault();
@@ -132,6 +134,7 @@ function HomePage({
       clearLocation();
       const selectedLocation = { ...result, source: "manual" };
       setManualLocation(selectedLocation);
+      setShowLocationOptions(false);
       setStartLocationQuery(result.name);
       setLocationSearchError("");
       setQuickCourseError("");
@@ -148,6 +151,7 @@ function HomePage({
 
   const clearManualLocation = () => {
     setManualLocation(null);
+    setShowLocationOptions(false);
     setStartLocationQuery("");
     setLocationSearchError("");
   };
@@ -527,13 +531,9 @@ function HomePage({
         <button
           className={`location-card location-card--${manualLocation ? "success" : status}`}
           type="button"
-          onClick={() =>
-            manualLocation
-              ? clearManualLocation()
-              : status === "success"
-                ? clearLocation()
-                : requestLocation()
-          }
+          onClick={() => (manualLocation || status === "success" || displayLocation)
+            ? setShowLocationOptions((open) => !open)
+            : requestLocation()}
         >
           <span className="location-icon">⌖</span>
           <span>
@@ -565,21 +565,24 @@ function HomePage({
             className="location-action"
             aria-label={
               manualLocation
-                ? "직접 선택한 출발지 사용 해제"
+                ? "출발지 바꾸기"
                 : status === "success"
-                  ? "한 번 더 누르면 현재 위치 사용 해제"
+                  ? "출발지 바꾸기"
                   : undefined
             }
           >
             {manualLocation
-              ? "✓"
+              ? "변경"
               : status === "loading" || status === "low_accuracy"
                 ? "…"
                 : status === "success"
-                  ? "✓"
+                  ? "변경"
                   : "›"}
           </span>
         </button>
+        {(manualLocation || status === "success" || displayLocation) && !showLocationOptions && (
+          <button className="start-location-change" type="button" onClick={() => setShowLocationOptions(true)}>출발지를 다른 곳으로 바꾸기</button>
+        )}
         {canChooseManualStart && <form className="start-location-search" onSubmit={handleSearchStartLocation}>
         <label className="sr-only" htmlFor="start-location-query">출발 지역 직접 입력</label>
         <input
@@ -656,17 +659,17 @@ function HomePage({
                   ? "코알라가 코스를 찾고 있어요"
                   : "자동 코스 추천"}
               </b>
-              <small>하고 싶은 일이 없어도 시간만 정하면 코알라가 짜드려요</small>
+              <small>하고 싶은 일이 없나요? 시간만 정하면 코알라가 짜드려요.</small>
             </span>
             <em className="koala-auto-chevron" aria-hidden="true">
               {pendingQuickCourse ? "…" : "›"}
             </em>
           </button>
           <section className="home-adventure-store" aria-label="색다른 추천">
-            <div className="home-adventure-head">
-              <span><b>색다른 추천</b><small>미스터리 가이드와 랜덤 코스를 골라보세요</small></span>
-              <em>옆으로 보기 →</em>
-            </div>
+            <button className="home-adventure-toggle" type="button" aria-expanded={showAdventureOptions} onClick={() => setShowAdventureOptions((open) => !open)}>
+              {showAdventureOptions ? "색다른 추천 접기" : "색다른 추천 보기 · 랜덤 코스와 미스터리 가이드"}
+            </button>
+            {showAdventureOptions && (
             <div className="home-adventure-cards home-adventure-cards--two">
               {[
                 ["blind-course", "🎁", "미스터리 가이드", "목적지는 도착하면 공개"],
@@ -677,6 +680,7 @@ function HomePage({
                 </button>
               ))}
             </div>
+            )}
           </section>
         </div>
         <button

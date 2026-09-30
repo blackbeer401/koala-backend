@@ -21,7 +21,10 @@ export default function RegionRecommendationList({
       <div className="ranking-heading">
         <div>
           <h2>{targetArea ? "요청한 지역 코스" : "지금 가기 좋은 지역"}</h2>
-          <p>지역을 누르면 실제 장소를 선택할 수 있어요</p>
+          <p>지역을 누르면 실제 장소를 선택할 수 있어요. 이동시간과 활동 조건을 함께 비교했어요.</p>
+          {Object.values(recommendationContext?.activity_preferences ?? {}).some((value) => Number(value) > 0) && (
+            <p className="recommendation-preference-note">선택한 활동 취향을 추천에 반영했어요.</p>
+          )}
           {origin?.label && (
             <p className="recommendation-origin" aria-label="추천 계산 출발지">
               출발 기준: {origin.label}

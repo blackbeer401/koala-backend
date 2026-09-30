@@ -164,19 +164,25 @@ export async function saveCourse(token, body) {
 export async function getSavedCourses(token) { if (!MOCK_AUTH) return api('/users/me/courses', { token }); assertMockToken(token); return read(COURSE_KEY, []) }
 export async function getExploredRegions(token) {
   if (!MOCK_AUTH) return api('/users/me/explored-regions', { token })
-  assertMockToken(token); return read(EXPLORED_REGIONS_KEY, [])
+  assertMockToken(token)
+  const eventKeys = read(GAMIFICATION_EVENTS_KEY, [])
+  return read(EXPLORED_REGIONS_KEY, []).map((region) => {
+    const visitedCourseIds = (region.course_ids ?? []).filter((id) => eventKeys.includes(`${id}:course_complete:`))
+    return { ...region, visited: visitedCourseIds.length > 0, visited_course_count: visitedCourseIds.length }
+  })
 }
 export async function getGamificationProfile(token) {
   if (!MOCK_AUTH) return api('/users/me/gamification', { token })
   assertMockToken(token)
   const stored = read(GAMIFICATION_KEY, null)
+  const visitedDistricts = (await getExploredRegions(token)).filter((region) => region.visited).length
   const profile = mockGamificationSnapshot(stored ?? {
     total_xp: 0,
     explored_district_count: 0,
     confirmed_course_count: 0,
     completed_course_count: 0,
     completed_quest_count: 0,
-  })
+  }, { districts: visitedDistricts })
   write(GAMIFICATION_KEY, profile)
   return profile
 }
@@ -219,10 +225,9 @@ export async function awardGamificationEvent(token, body) {
   }
   // 개발용 임시 로그인도 이벤트 키를 저장해 중복 보상은 막는다.
   const profile = await getGamificationProfile(token)
-  const priorRegions = body.event_type === 'course_confirm' && body.districts?.length ? await getExploredRegions(token) : []
-  const priorDistrictCodes = new Set(priorRegions.map((region) => region.district_code))
-  const newlyUnlockedDistricts = body.event_type === 'course_confirm'
-    ? (body.districts ?? []).filter((district) => !priorDistrictCodes.has(district.district_code))
+  const priorRegions = body.event_type === 'course_complete' ? await getExploredRegions(token) : []
+  const newlyUnlockedDistricts = body.event_type === 'course_complete'
+    ? priorRegions.filter((region) => !region.visited && region.course_ids?.includes(body.course_id))
     : []
   const dailyQuestCount = dailyQuest
     ? eventKeys.filter((key) => key.startsWith(`daily:quest:${dailyQuest[1]}:`)).length
@@ -243,15 +248,20 @@ export async function awardGamificationEvent(token, body) {
   writeGAMIFICATIONSnapshot(updated)
   if (body.event_type === 'course_confirm' && body.districts?.length) {
     const regions = await recordExploredRegions(token, { course_id: body.course_id, districts: body.districts })
-    updated.explored_district_count = regions.length
+    updated.explored_district_count = regions.filter((region) => region.visited).length
     write(GAMIFICATION_KEY, updated)
     writeGAMIFICATIONSnapshot(updated)
     write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
-    const unlocked = newlyUnlockedDistricts.map((district) => ({ district_code: district.district_code, district_name: regions.find((region) => region.district_code === district.district_code)?.district_name }))
+    return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: [], newly_unlocked_achievements: newlyUnlockedAchievements, profile: updated, regions }
+  }
+  write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
+  if (body.event_type === 'course_complete') {
+    const regions = await getExploredRegions(token)
+    window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: regions }))
+    const unlocked = newlyUnlockedDistricts.map(({ district_code, district_name }) => ({ district_code, district_name }))
     try { sessionStorage.setItem('koala-region-unlock-flash', JSON.stringify({ at: Date.now(), districts: unlocked })) } catch { /* animation state is optional */ }
     return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: unlocked, newly_unlocked_achievements: newlyUnlockedAchievements, profile: updated, regions }
   }
-  write(GAMIFICATION_EVENTS_KEY, [...eventKeys, mockEventKey])
   return { xp_awarded: awarded, already_completed: false, newly_unlocked_districts: [], newly_unlocked_achievements: newlyUnlockedAchievements, profile: updated }
 }
 function writeGAMIFICATIONSnapshot(profile) {
@@ -279,8 +289,9 @@ export async function recordExploredRegions(token, body) {
     if (index < 0) current.push(updated); else current[index] = updated
   }
   write(EXPLORED_REGIONS_KEY, current)
-  window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: current }))
-  return current
+  const regions = await getExploredRegions(token)
+  window.dispatchEvent(new CustomEvent('koala-explored-regions-updated', { detail: regions }))
+  return regions
 }
 export async function deleteSavedCourse(token, courseId) {
   if (!MOCK_AUTH) return api(`/users/me/courses/${courseId}`, { method: 'DELETE', token })

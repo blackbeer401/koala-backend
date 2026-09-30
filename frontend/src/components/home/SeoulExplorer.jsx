@@ -25,10 +25,11 @@ export default function SeoulExplorer({ exploredRegions = [] }) {
   const [newlyUnlockedCodes, setNewlyUnlockedCodes] = useState([]);
   const [activeMapLabel, setActiveMapLabel] = useState(null);
   const records = useMemo(() => new Map(exploredRegions.map((item) => [item.district_code, item])), [exploredRegions]);
+  const visitedCount = exploredRegions.filter((item) => item.visited).length;
   const selectedDistrict = SEOUL_DISTRICTS.find((district) => district.code === selectedCode) ?? null;
   const selectedRecord = selectedCode ? records.get(selectedCode) : null;
   const featureList = useMemo(() => geometry.features.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")), []);
-  const shownDistricts = SEOUL_DISTRICTS.filter(({ code }) => filter === "all" || (filter === "explored") === records.has(code));
+  const shownDistricts = SEOUL_DISTRICTS.filter(({ code }) => filter === "all" || (filter === "explored" && records.get(code)?.visited) || (filter === "planned" && records.has(code) && !records.get(code)?.visited) || (filter === "locked" && !records.has(code)));
 
   const showMapLabel = (event, district) => {
     const { x, y, width, height } = event.currentTarget.getBBox();
@@ -61,26 +62,26 @@ export default function SeoulExplorer({ exploredRegions = [] }) {
   return (
     <section className="seoul-explorer" aria-label="서울 약속 지도">
       <header className="seoul-explorer-heading">
-        <div><span className="seoul-eyebrow">MY SEOUL</span><h3>서울 약속 지도</h3><p>코스를 확정한 지역이 나만의 지도로 기록돼요.</p></div>
-        <span className="seoul-progress-count">{records.size}<small> / 25개 구</small></span>
+        <div><span className="seoul-eyebrow">MY SEOUL</span><h3>서울 약속 지도</h3><p>코스 확정은 방문 계획, 안내 완료는 방문 기록으로 표시해요.</p></div>
+        <span className="seoul-progress-count">{visitedCount}<small> / 25개 구 방문</small></span>
       </header>
-      <div className="seoul-progress-track" role="progressbar" aria-label="탐험한 자치구" aria-valuenow={records.size} aria-valuemin={0} aria-valuemax={25}><span style={{ width: `${records.size / 25 * 100}%` }} /></div>
+      <div className="seoul-progress-track" role="progressbar" aria-label="방문 확인한 자치구" aria-valuenow={visitedCount} aria-valuemin={0} aria-valuemax={25}><span style={{ width: `${visitedCount / 25 * 100}%` }} /></div>
       <div className="seoul-explorer-toolbar" aria-label="지도 보기 설정">
         <div className="seoul-view-toggle">
           <button type="button" className={view === "map" ? "is-active" : ""} onClick={() => setView("map")} aria-pressed={view === "map"}><img src={mapIcon} alt="" />지도</button>
           <button type="button" className={view === "list" ? "is-active" : ""} onClick={() => setView("list")} aria-pressed={view === "list"}><img src={listIcon} alt="" />목록</button>
         </div>
-        <span className="seoul-legend"><i className="is-unlocked" /> 탐험 완료 <i className="is-locked" /> 잠김</span>
+        <span className="seoul-legend"><i className="is-unlocked" /> 방문 확인 <i className="is-planned" /> 계획 <i className="is-locked" /> 미선택</span>
       </div>
       {view === "map" ? (
         <div className="seoul-map-layout">
           <div className="seoul-map-canvas">
-            <svg viewBox={geometry.viewBox} role="img" aria-label={`서울 자치구 지도, ${records.size}개 구 탐험 완료`}>
+            <svg viewBox={geometry.viewBox} role="img" aria-label={`서울 자치구 지도, ${visitedCount}개 구 방문 확인`}>
               <g transform={`translate(${(1000 - 1000 * zoom) / 2} ${(810 - 810 * zoom) / 2}) scale(${zoom})`}>
                 {featureList.map((district) => {
                   const unlocked = records.has(district.code);
                   const selected = selectedCode === district.code;
-                  return <path key={district.code} d={district.path} fillRule="evenodd" className={`seoul-district-shape ${unlocked ? "is-unlocked" : "is-locked"} ${selected ? "is-selected" : ""} ${newlyUnlockedCodes.includes(district.code) ? "is-newly-unlocked" : ""}`} tabIndex={0} role="button" aria-label={`${district.name}${unlocked ? ", 탐험 완료" : ", 잠김"}`} aria-pressed={selected} onPointerEnter={(event) => showMapLabel(event, district)} onPointerLeave={() => { if (selectedCode !== district.code) setActiveMapLabel(null); }} onFocus={(event) => showMapLabel(event, district)} onBlur={() => { if (selectedCode !== district.code) setActiveMapLabel(null); }} onClick={(event) => { setSelectedCode(district.code); showMapLabel(event, district); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedCode(district.code); showMapLabel(event, district); } }} />;
+                  return <path key={district.code} d={district.path} fillRule="evenodd" className={`seoul-district-shape ${records.get(district.code)?.visited ? "is-unlocked" : unlocked ? "is-planned" : "is-locked"} ${selected ? "is-selected" : ""} ${newlyUnlockedCodes.includes(district.code) ? "is-newly-unlocked" : ""}`} tabIndex={0} role="button" aria-label={`${district.name}${records.get(district.code)?.visited ? ", 방문 확인" : unlocked ? ", 방문 계획" : ", 미선택"}`} aria-pressed={selected} onPointerEnter={(event) => showMapLabel(event, district)} onPointerLeave={() => { if (selectedCode !== district.code) setActiveMapLabel(null); }} onFocus={(event) => showMapLabel(event, district)} onBlur={() => { if (selectedCode !== district.code) setActiveMapLabel(null); }} onClick={(event) => { setSelectedCode(district.code); showMapLabel(event, district); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedCode(district.code); showMapLabel(event, district); } }} />;
                 })}
                 {activeMapLabel && (
                   <text
@@ -101,27 +102,27 @@ export default function SeoulExplorer({ exploredRegions = [] }) {
       ) : (
         <div className="seoul-list-layout">
           <div className="seoul-filter-tabs" aria-label="지역 목록 필터">
-            {[["all", "전체 25"], ["explored", `탐험 ${records.size}`], ["locked", `잠김 ${25 - records.size}`]].map(([key, label]) => <button type="button" key={key} className={filter === key ? "is-active" : ""} onClick={() => setFilter(key)} aria-pressed={filter === key}>{label}</button>)}
+            {[["all", "전체 25"], ["explored", `방문 ${visitedCount}`], ["planned", `계획 ${records.size - visitedCount}`], ["locked", `미선택 ${25 - records.size}`]].map(([key, label]) => <button type="button" key={key} className={filter === key ? "is-active" : ""} onClick={() => setFilter(key)} aria-pressed={filter === key}>{label}</button>)}
           </div>
           <div className="seoul-district-list">
             {shownDistricts.map((district) => {
               const record = records.get(district.code);
-              return <button type="button" key={district.code} className="seoul-district-row" onClick={() => { setSelectedCode(district.code); setView("map"); }}><img src={record ? unlockedIcon : lockedIcon} alt="" /><span><b>{district.name}</b><small>{record ? `코스 ${record.course_count ?? 1}회 · 최근 ${dateLabel(record.last_used_at)}` : "아직 탐험 전이에요"}</small></span><span className={record ? "seoul-status is-unlocked" : "seoul-status"}>{record ? "완료" : "잠김"}</span></button>;
+              return <button type="button" key={district.code} className="seoul-district-row" onClick={() => { setSelectedCode(district.code); setView("map"); }}><img src={record?.visited ? unlockedIcon : lockedIcon} alt="" /><span><b>{district.name}</b><small>{record ? `계획 ${record.course_count ?? 1}회 · 최근 ${dateLabel(record.last_used_at)}` : "아직 계획 전이에요"}</small></span><span className={record?.visited ? "seoul-status is-unlocked" : "seoul-status"}>{record?.visited ? "방문 확인" : record ? "방문 계획" : "미선택"}</span></button>;
             })}
           </div>
         </div>
       )}
-      <p className="seoul-explorer-footnote"><img src={calendarIcon} alt="" /> 추천 코스를 확정하면 해당 지역이 열려요. 실제 방문 여부는 확인하지 않아요.</p>
+      <p className="seoul-explorer-footnote"><img src={calendarIcon} alt="" /> 방문 기록은 코스 안내를 끝까지 진행하면 남아요. GPS가 느릴 때는 도착 버튼으로 직접 확인할 수 있어요.</p>
     </section>
   );
 }
 
 function RegionDetail({ district, record }) {
   if (!district) return <div className="seoul-region-detail is-empty"><img src={routeIcon} alt="" /><b>지도에서 지역을 선택해 보세요</b><span>각 구를 눌러 코스 기록을 확인할 수 있어요.</span></div>;
-  return <div className={`seoul-region-detail ${record ? "is-unlocked" : "is-locked"}`}>
-    <img className="seoul-region-detail-icon" src={record ? unlockedIcon : lockedIcon} alt="" />
-    <span className="seoul-region-kicker">{record ? "EXPLORED REGION" : "LOCKED REGION"}</span>
+  return <div className={`seoul-region-detail ${record?.visited ? "is-unlocked" : "is-locked"}`}>
+    <img className="seoul-region-detail-icon" src={record?.visited ? unlockedIcon : lockedIcon} alt="" />
+    <span className="seoul-region-kicker">{record?.visited ? "방문 확인" : record ? "방문 계획" : "미선택 지역"}</span>
     <h4>{district.name}</h4>
-    {record ? <><b className="seoul-region-course-count">코스 {record.course_count ?? 1}회</b><span className="seoul-region-date">최근 기록 · {dateLabel(record.last_used_at)}</span>{record.place_names?.length > 0 && <div className="seoul-region-places"><b>코스에 담은 장소</b><p>{record.place_names.join(" · ")}</p></div>}</> : <><p>아직 탐험하지 않은 지역이에요.</p><small>이 지역 장소를 포함한 코스를 확정하면 지도에서 열려요.</small></>}
+    {record ? <><b className="seoul-region-course-count">계획한 코스 {record.course_count ?? 1}회 · 방문 확인 {record.visited_course_count ?? 0}회</b><span className="seoul-region-date">최근 계획 · {dateLabel(record.last_used_at)}</span>{record.place_names?.length > 0 && <div className="seoul-region-places"><b>코스에 담은 장소</b><p>{record.place_names.join(" · ")}</p></div>}</> : <><p>아직 선택하지 않은 지역이에요.</p><small>이 지역 장소를 포함한 코스를 확정하면 계획으로 표시돼요.</small></>}
   </div>;
 }

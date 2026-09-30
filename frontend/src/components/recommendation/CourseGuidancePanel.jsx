@@ -141,7 +141,7 @@ export default function CourseGuidancePanel({
                       ? "현재 위치 신호가 약해 확인 중"
                       : liveLocationStatus === "unavailable"
                         ? "기존 경로로 안내 중"
-                        : "현재 위치 확인 중"}
+                    : "안내 중 · 위치를 확인하고 있어요"}
             </span>
             <b>
               {guideStep + 1} / {guideStopCount}
@@ -204,6 +204,16 @@ export default function CourseGuidancePanel({
               </p>
             )}
           </section>
+          <div className="guide-arrival-action">
+            <button
+              className="guide-next-button"
+              type="button"
+              onClick={() => setGuideStep((current) => Math.min(current + 1, guideStopCount))}
+            >
+              {guidePlace ? "이 장소에 도착했어요" : "다음 일정 장소에 도착했어요"} <span aria-hidden="true">→</span>
+            </button>
+            <small>GPS가 늦게 잡히면 버튼을 눌러 직접 확인할 수 있어요.</small>
+          </div>
           {mysteryMode && guidePreviousPlace && (
             <div className="mystery-arrival-card" role="status">
               <small>방금 도착한 장소</small>
@@ -252,6 +262,7 @@ export default function CourseGuidancePanel({
               <button
                 key={place.id}
                 type="button"
+                disabled={index > guideStep}
                 className={guideStep === index ? "is-active" : ""}
                 style={{
                   "--place-color":
@@ -268,6 +279,7 @@ export default function CourseGuidancePanel({
             {hasEndDestination && (
               <button
                 type="button"
+                disabled={guideStep < visiblePlaces.length}
                 className={
                   guideStep === visiblePlaces.length
                     ? "is-active is-end"
@@ -280,20 +292,6 @@ export default function CourseGuidancePanel({
               </button>
             )}
           </div>
-          <button
-            className="guide-next-button"
-            type="button"
-            onClick={() =>
-              setGuideStep((current) =>
-                Math.min(current + 1, guideStopCount),
-              )
-            }
-          >
-            {mysteryMode && guideBoarding.length
-              ? "내렸어요"
-              : "도착했어요"}{" "}
-            <span>→</span>
-          </button>
           {mysteryMode && !mysteryRevealed && (
             <button
               className="mystery-reveal-button"

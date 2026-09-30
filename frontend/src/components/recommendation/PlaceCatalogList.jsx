@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import PlaceChoiceRow from "./PlaceChoiceRow";
 import { ACTIVITY_CATEGORY_LABELS, placeIdentity } from "../../utils/recommendationPlaces";
 
@@ -21,13 +22,33 @@ export default function PlaceCatalogList({
   onToggleFavorite,
   onMakePreferred,
 }) {
+  const touchStartY = useRef(null);
+  const loadIfNearBottom = (target) => {
+    if (!hasMorePlaces || moreLoadError || placeStatus === "more-loading") return;
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceToBottom <= 180) void onLoadMore();
+  };
+
   return (
     <>
-      <div className="ranking-scroll place-scroll" ref={scrollRef} onScroll={(event) => {
-        const target = event.currentTarget;
-        const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-        if (distanceToBottom <= 180) void onLoadMore();
-      }}>
+      <div
+        className="ranking-scroll place-scroll"
+        ref={scrollRef}
+        onScroll={(event) => loadIfNearBottom(event.currentTarget)}
+        onWheel={(event) => {
+          if (event.deltaY > 0) loadIfNearBottom(event.currentTarget);
+        }}
+        onTouchStart={(event) => {
+          touchStartY.current = event.touches[0]?.clientY ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const startY = touchStartY.current;
+          touchStartY.current = null;
+          if (startY !== null && startY - (event.changedTouches[0]?.clientY ?? startY) >= 40) {
+            loadIfNearBottom(event.currentTarget);
+          }
+        }}
+      >
         {places.map((place) => {
           const key = placeIdentity(place);
           const explicitPreference = account?.preferences?.activity_preferences?.[place.category] ?? 0;

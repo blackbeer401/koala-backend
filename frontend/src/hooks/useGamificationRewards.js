@@ -35,7 +35,7 @@ export function useGamificationRewards({
       messages.push(`업적 달성 · 칭호 획득 ${visibleTitles}${titles.length > 2 ? ` 외 ${titles.length - 2}개` : ""}`);
     }
     const districts = reward.newly_unlocked_districts?.map((item) => item.district_name).filter(Boolean) ?? [];
-    if (districts.length) messages.push(`${districts.join("·")} 지역 해제`);
+    if (districts.length) messages.push(`${districts.join("·")} 방문 기록 완료`);
     if (!messages.length && reward.xp_awarded > 0) messages.push(fallbackMessage);
     if (!messages.length) return;
     if (reward.xp_awarded > 0) messages.push(`+${reward.xp_awarded} XP`);
